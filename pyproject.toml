@@ -1,0 +1,119 @@
+[build-system]
+requires = [
+    "setuptools >= 64",
+    "setuptools_scm[toml] >= 6.4"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "redis-anyio"
+description = "Asynchronous client for Redis using AnyIO"
+readme = "README.rst"
+authors = [{name = "Alex Grönholm", email = "alex.gronholm@nextday.fi"}]
+license = {file = "LICENSE"}
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Frameworks :: AnyIO",
+    "Typing :: Typed",
+    "Topic :: Database",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+requires-python = ">= 3.8"
+dependencies = [
+    "anyio >= 3.6.2, < 4.0",
+    "Tenacity >= 8.2",
+    "typing_extensions >= 4.4.0; python_version < '3.11'",
+]
+dynamic = ["version"]
+
+[project.urls]
+Documentation = "https://redis-anyio.readthedocs.io/en/latest/"
+"Change log" = "https://redis-anyio.readthedocs.io/en/latest/versionhistory.html"
+"Source code" = "https://github.com/agronholm/redis-anyio"
+"Issue tracker" = "https://github.com/agronholm/redis-anyio/issues"
+
+[project.optional-dependencies]
+opentelemetry = [
+    "opentelemetry-instrumentation >= 0.38b0",
+]
+test = [
+    "anyio[trio]",
+    "pytest >= 7",
+    "typeguard >= 4.0.0rc4",
+]
+doc = [
+    "packaging",
+    "sphinx_rtd_theme >= 1.2.0",
+    "sphinx-autodoc-typehints >= 1.2.0",
+]
+
+[project.entry-points.opentelemetry_instrumentor]
+redis-anyio = "redis_anyio._opentelemetry:RedisInstrumentor"
+
+[tool.setuptools.package-data]
+redis_anyio = ["py.typed"]
+
+[tool.setuptools_scm]
+version_scheme = "post-release"
+local_scheme = "dirty-tag"
+
+[tool.pytest.ini_options]
+addopts = "-rsx --tb=short"
+testpaths = "tests"
+xfail_strict = true
+filterwarnings = [
+    "error",
+    "ignore::RuntimeWarning:trio._core._multierror",  # trio 0.21
+]
+
+[tool.coverage.run]
+source = ["redis_anyio"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:"
+]
+
+[tool.ruff]
+line-length = 88
+select = [
+    "E", "F", "W",  # default flake-8
+    "I",            # isort
+    "PGH",          # pygrep-hooks
+    "UP",           # pyupgrade
+]
+ignore = [
+    "UP035",
+]
+target-version = "py38"
+src = ["src"]
+
+[tool.mypy]
+python_version = "3.8"
+strict = true
+pretty = true
+
+[tool.tox]
+legacy_tox_ini = """
+[tox]
+envlist = pypy3, py38, py39, py310, py311
+skip_missing_interpreters = true
+minversion = 4.0
+
+[testenv]
+extras = test
+commands = python -m pytest --typeguard-packages=redis_anyio {posargs}
+
+[testenv:docs]
+extras = doc
+commands = sphinx-build -W -n docs build/sphinx
+"""
