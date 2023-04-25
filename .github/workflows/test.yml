@@ -20,6 +20,8 @@ jobs:
         python-version: ${{ matrix.python-version }}
         cache: pip
         cache-dependency-path: pyproject.toml
+    - name: Start external services
+      run: docker compose up -d
     - name: Install dependencies
       run: pip install -e .[test] coveralls coverage[toml]
     - name: Test with pytest
