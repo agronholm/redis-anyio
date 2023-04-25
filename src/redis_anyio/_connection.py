@@ -4,7 +4,7 @@ import random
 import sys
 from collections import defaultdict, deque
 from collections.abc import AsyncGenerator, Generator, Sequence
-from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from ssl import SSLContext
 from types import TracebackType
@@ -47,42 +47,38 @@ class RedisConnection:
     _send_stream: AnyByteSendStream = field(init=False)
     _response_stream: MemoryObjectReceiveStream[RESP3Value] = field(init=False)
     _parser: RESP3Parser = field(init=False, default_factory=RESP3Parser)
-    _subscriptions: dict[bytes, set[MemoryObjectSendStream[RESP3Value]]] = field(
-        init=False, default_factory=lambda: defaultdict(set)
-    )
-    _ssubscriptions: dict[bytes, set[MemoryObjectSendStream[RESP3Value]]] = field(
-        init=False, default_factory=lambda: defaultdict(set)
-    )
-    _psubscriptions: dict[bytes, set[MemoryObjectSendStream[RESP3Value]]] = field(
-        init=False, default_factory=lambda: defaultdict(set)
+    # type -> channel/pattern key -> set of streams
+    _push_data_receivers: dict[
+        str, dict[bytes, set[MemoryObjectSendStream[RESP3Value]]]
+    ] = field(
+        init=False,
+        default_factory=lambda: defaultdict(lambda: defaultdict(set)),
     )
 
     async def _handle_push_data(self, item: RESP3PushData) -> None:
-        if item.type == "message":  # Pub/sub
-            assert len(item.data) == 2
+        if not (receivers := self._push_data_receivers.get(item.type)):
+            return
+
+        if item.type in ("message", "smessage"):
             assert isinstance(item.data[0], bytes)
-            if pubsub_streams := self._subscriptions.get(item.data[0], ()):
-                item_tuple = item.data[0].decode("utf-8", errors="replace"), item
-                async with create_task_group() as tg:
-                    for pubsub_stream in pubsub_streams:
-                        tg.start_soon(pubsub_stream.send, item_tuple)
-        elif item.type == "smessage":  # Pub/sub for sharded subscriptions
-            assert len(item.data) == 2
+            assert isinstance(item.data[1], bytes)
+            target_key = item.data[0]
+            channel = item.data[0].decode("utf-8", errors="replace")
+            value = channel, item.data[1]
+        elif item.type == "pmessage":
             assert isinstance(item.data[0], bytes)
-            if pubsub_streams := self._ssubscriptions.get(item.data[0], ()):
-                item_tuple = item.data[0].decode("utf-8", errors="replace"), item
-                async with create_task_group() as tg:
-                    for pubsub_stream in pubsub_streams:
-                        tg.start_soon(pubsub_stream.send, item_tuple)
-        elif item.type == "pmessage":  # Pub/sub for pattern subscriptions
-            assert len(item.data) == 3
-            assert isinstance(item.data[0], bytes)
-            if pubsub_streams := self._psubscriptions.get(item.data[0], ()):
-                assert isinstance(item.data[1], bytes)
-                item_tuple = item.data[1].decode("utf-8", errors="replace"), item
-                async with create_task_group() as tg:
-                    for pubsub_stream in pubsub_streams:
-                        tg.start_soon(pubsub_stream.send, item_tuple)
+            assert isinstance(item.data[1], bytes)
+            assert isinstance(item.data[2], bytes)
+            target_key = item.data[0]
+            channel = item.data[1].decode("utf-8", errors="replace")
+            value = channel, item.data[2]
+        else:
+            return
+
+        if streams := receivers.get(target_key):
+            async with create_task_group() as tg:
+                for stream in streams:
+                    tg.start_soon(stream.send, value)
 
     async def _handle_attribute(self, attribute: RESP3Attribute) -> None:
         pass  # Drop attributes on the floor for now
@@ -152,44 +148,23 @@ class RedisConnection:
         return responses
 
     @contextmanager
-    def _add_subscriptions(
+    def add_push_data_receiver(
         self,
         stream: MemoryObjectSendStream[RESP3Value],
-        topics_or_patterns: Sequence[str],
-        collection: dict[bytes, set[MemoryObjectSendStream[RESP3Value]]],
+        keys: Sequence[str],
+        type_: str,
     ) -> Generator[None, None, None]:
-        unsubscribe_list: dict[bytes, MemoryObjectSendStream[RESP3Value]] = {}
-        for topic_or_pattern in topics_or_patterns:
-            key = topic_or_pattern.encode("utf-8")
-            collection[key].add(stream)
-            unsubscribe_list[key] = stream
+        receivers = self._push_data_receivers[type_]
+        for key in keys:
+            receivers[key.encode("utf-8")].add(stream)
 
-        try:
-            yield
-        finally:
-            for key, stream in unsubscribe_list.items():
-                collection[key].remove(stream)
+        yield
 
-    def add_subscriptions(
-        self,
-        stream: MemoryObjectSendStream[RESP3Value],
-        channels: Sequence[str],
-    ) -> AbstractContextManager[None]:
-        return self._add_subscriptions(stream, channels, self._subscriptions)
+        for key in keys:
+            receivers[key.encode("utf-8")].remove(stream)
 
-    def add_ssubscriptions(
-        self,
-        stream: MemoryObjectSendStream[RESP3Value],
-        channels: Sequence[str],
-    ) -> AbstractContextManager[None]:
-        return self._add_subscriptions(stream, channels, self._ssubscriptions)
-
-    def add_psubscriptions(
-        self,
-        stream: MemoryObjectSendStream[RESP3Value],
-        patterns: Sequence[str],
-    ) -> AbstractContextManager[None]:
-        return self._add_subscriptions(stream, patterns, self._psubscriptions)
+        if not receivers:
+            del self._push_data_receivers[type_]
 
 
 @dataclass(frozen=True)

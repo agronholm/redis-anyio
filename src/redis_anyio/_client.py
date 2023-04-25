@@ -526,7 +526,9 @@ class RedisClient:
             conn = await exit_stack.enter_async_context(self._pool.acquire())
             send, receive = create_memory_object_stream(0)
             await exit_stack.enter_async_context(receive)
-            exit_stack.enter_context(conn.add_subscriptions(send, topics))
+            exit_stack.enter_context(
+                conn.add_push_data_receiver(send, topics, "message")
+            )
             await conn.execute_command("SUBSCRIBE", *topics, wait_reply=False)
             exit_stack.push_async_callback(
                 conn.execute_command, "UNSUBSCRIBE", *topics, wait_reply=False
@@ -556,7 +558,9 @@ class RedisClient:
             conn = await exit_stack.enter_async_context(self._pool.acquire())
             send, receive = create_memory_object_stream(0)
             await exit_stack.enter_async_context(receive)
-            exit_stack.enter_context(conn.add_ssubscriptions(send, shardchannels))
+            exit_stack.enter_context(
+                conn.add_push_data_receiver(send, shardchannels, "smessage")
+            )
             await conn.execute_command("SSUBSCRIBE", *shardchannels, wait_reply=False)
             exit_stack.push_async_callback(
                 conn.execute_command, "SUNSUBSCRIBE", *shardchannels, wait_reply=False
@@ -586,7 +590,9 @@ class RedisClient:
             conn = await exit_stack.enter_async_context(self._pool.acquire())
             send, receive = create_memory_object_stream(0)
             await exit_stack.enter_async_context(receive)
-            exit_stack.enter_context(conn.add_psubscriptions(send, patterns))
+            exit_stack.enter_context(
+                conn.add_push_data_receiver(send, patterns, "pmessage")
+            )
             await conn.execute_command("PSUBSCRIBE", *patterns, wait_reply=False)
             exit_stack.push_async_callback(
                 conn.execute_command, "PUNSUBSCRIBE", *patterns, wait_reply=False
