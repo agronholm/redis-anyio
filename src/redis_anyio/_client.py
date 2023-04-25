@@ -211,39 +211,6 @@ class RedisClient:
     # List operations
     #
 
-    async def blmpop(
-        self,
-        numkeys: int,
-        wherefrom: Literal["left", "right"],
-        *keys: str,
-        timeout: float = 0,
-    ) -> list[RESP3Value]:
-        """
-        Pops one or more elements from one of the given lists.
-
-        Unlike :meth:`lmpop`, this method first waits for an element to appear on
-        any of the lists if all of them are empty.
-
-        :param numkeys: maximum number of
-        :param wherefrom: either ``left`` or ``right``
-        :param timeout: seconds to wait for an element to appear on ``source``; 0 to
-            wait indefinitely
-        :return: the element being popped from ``source`` and moved to ``destination``,
-            or ``None`` if the timeout was reached
-
-        .. seealso:: `Official manual page <https://redis.io/commands/blmpop/>`_
-
-        """
-        retval = await self._pool.execute_command("BLMPOP", *keys, timeout)
-        assert isinstance(retval, list)
-        return retval
-
-    async def blpop(self, *keys: str, timeout: float = 0) -> RESP3Value:
-        return await self._pool.execute_command("BLPOP", *keys, timeout)
-
-    async def brpop(self, *keys: str, timeout: float = 0) -> RESP3Value:
-        return await self._pool.execute_command("BRPOP", *keys, timeout)
-
     async def blmove(
         self,
         source: str,
@@ -275,6 +242,71 @@ class RedisClient:
             "BLMOVE", source, destination, wherefrom, whereto, timeout
         )
 
+    async def blmpop(
+        self,
+        numkeys: int,
+        wherefrom: Literal["left", "right"],
+        *keys: str,
+        timeout: float = 0,
+    ) -> list[RESP3Value]:
+        """
+        Pops one or more elements from one of the given lists.
+
+        Unlike :meth:`lmpop`, this method first waits for an element to appear on
+        any of the lists if all of them are empty.
+
+        :param numkeys: maximum number of
+        :param wherefrom: either ``left`` or ``right``
+        :param timeout: seconds to wait for an element to appear on ``source``; 0 to
+            wait indefinitely
+        :return: the element being popped from ``source`` and moved to ``destination``,
+            or ``None`` if the timeout was reached
+
+        .. seealso:: `Official manual page <https://redis.io/commands/blmpop/>`_
+
+        """
+        retval = await self._pool.execute_command("BLMPOP", *keys, timeout)
+        assert isinstance(retval, list)
+        return retval
+
+    async def blpop(self, *keys: str, timeout: float = 0) -> tuple[str, RESP3Value]:
+        """
+        Remove and return the first element from one of the given lists.
+
+        Unlike :meth:`lpop`, this method first waits for an element to appear on
+        any of the lists if all of them are empty.
+
+        :param keys: the lists to pop from
+        :param timeout: seconds to wait for an element to appear on any of the lists; 0
+            to wait indefinitely
+        :return: the element that was removed, or ``None`` if the timeout was reached
+            and all the lists remained empty
+
+        .. seealso:: `Official manual page <https://redis.io/commands/blpop/>`_
+
+        """
+        retval = await self._pool.execute_command("BLPOP", *keys, timeout)
+        assert isinstance(retval, list) and isinstance(retval, str)
+        return tuple(retval)
+
+    async def brpop(self, *keys: str, timeout: float = 0) -> RESP3Value:
+        """
+        Remove and return the last element from one of the given lists.
+
+        Unlike :meth:`rpop`, this method first waits for an element to appear on
+        any of the lists if all of them are empty.
+
+        :param keys: the lists to pop from
+        :param timeout: seconds to wait for an element to appear on any of the lists; 0
+            to wait indefinitely
+        :return: the element that was removed, or ``None`` if the timeout was reached
+            and all the lists remained empty
+
+        .. seealso:: `Official manual page <https://redis.io/commands/brpop/>`_
+
+        """
+        return await self._pool.execute_command("BRPOP", *keys, timeout)
+
     async def lmove(
         self,
         source: str,
@@ -298,6 +330,46 @@ class RedisClient:
         return await self._pool.execute_command(
             "LMOVE", source, destination, wherefrom, whereto
         )
+
+    async def lindex(self, key: str, index: int) -> RESP3Value:
+        """
+        Return the element at index ``index`` in key ``key``.
+
+        :param key: the list to get the element from
+        :param index: numeric index on the list
+        :return: the element at the specified index
+
+        .. seealso:: `Official manual page <https://redis.io/commands/lindex/>`_
+
+        """
+        return await self._pool.execute_command("LINDEX", key, index)
+
+    async def linsert(
+        self,
+        key: str,
+        where: Literal["before", "after"],
+        pivot: RESP3Value,
+        element: RESP3Value,
+    ) -> int:
+        """
+        Insert ``element`` to the list ``key`` either before or after ``pivot``.
+
+        :param key: the list to get the element from
+        :param where: ``before`` to insert the element before the reference value,
+            ``after`` to insert the element after the reference value
+        :param pivot: the reference value to look for
+        :param element: the element to be inserted
+        :return: the length of the list after a successful operation; 0 if the key
+            doesn't exist, and -1 when the pivot wasn't found
+
+        .. seealso:: `Official manual page <https://redis.io/commands/linsert/>`_
+
+        """
+        retval = await self._pool.execute_command(
+            "LINSERT", key, where.upper(), pivot, element
+        )
+        assert isinstance(retval, int)
+        return retval
 
     async def llen(self, key: str) -> int:
         """
@@ -375,45 +447,6 @@ class RedisClient:
         retval = await self._pool.execute_command("RPUSHX", key, *values)
         assert isinstance(retval, int)
         return retval
-
-    #
-    # Miscellaneous operations
-    #
-
-    async def flushall(self, sync: bool = True) -> None:
-        """
-        Clears all keys in all databases.
-
-        :param sync: if ``True``, flush the databases synchronously;
-            if ``False``, flush them asynchronously.
-
-        .. seealso:: `Official manual page <https://redis.io/commands/flushall/>`_
-
-        """
-        mode = "SYNC" if sync else "ASYNC"
-        await self._pool.execute_command("FLUSHALL", mode)
-
-    async def flushdb(self, sync: bool = True) -> None:
-        """
-        Clears all keys in the currently selected database.
-
-        :param sync: if ``True``, flush the database synchronously;
-            if ``False``, flush it asynchronously.
-
-        .. seealso:: `Official manual page <https://redis.io/commands/flushdb/>`_
-
-        """
-        mode = "SYNC" if sync else "ASYNC"
-        await self._pool.execute_command("FLUSHDB", mode)
-
-    async def ping(self) -> None:
-        nonce = str(random.randint(0, 100000)).encode("ascii")
-        retval = await self._pool.execute_command("PING", nonce)
-        if retval != nonce:
-            raise RuntimeError(
-                f"PING command returned an unexpected payload (got {retval!r}, "
-                f"expected {nonce!r}"
-            )
 
     #
     # String operations
@@ -598,3 +631,42 @@ class RedisClient:
                 conn.execute_command, "PUNSUBSCRIBE", *patterns, wait_reply=False
             )
             yield receive
+
+    #
+    # Miscellaneous operations
+    #
+
+    async def flushall(self, sync: bool = True) -> None:
+        """
+        Clears all keys in all databases.
+
+        :param sync: if ``True``, flush the databases synchronously;
+            if ``False``, flush them asynchronously.
+
+        .. seealso:: `Official manual page <https://redis.io/commands/flushall/>`_
+
+        """
+        mode = "SYNC" if sync else "ASYNC"
+        await self._pool.execute_command("FLUSHALL", mode)
+
+    async def flushdb(self, sync: bool = True) -> None:
+        """
+        Clears all keys in the currently selected database.
+
+        :param sync: if ``True``, flush the database synchronously;
+            if ``False``, flush it asynchronously.
+
+        .. seealso:: `Official manual page <https://redis.io/commands/flushdb/>`_
+
+        """
+        mode = "SYNC" if sync else "ASYNC"
+        await self._pool.execute_command("FLUSHDB", mode)
+
+    async def ping(self) -> None:
+        nonce = str(random.randint(0, 100000)).encode("ascii")
+        retval = await self._pool.execute_command("PING", nonce)
+        if retval != nonce:
+            raise RuntimeError(
+                f"PING command returned an unexpected payload (got {retval!r}, "
+                f"expected {nonce!r}"
+            )
