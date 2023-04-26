@@ -41,6 +41,17 @@ if sys.version_info >= (3, 11):
 else:
     from typing_extensions import Self
 
+PUBSUB_REPLIES = frozenset(
+    [
+        "subscribe",
+        "ssubscribe",
+        "psubscribe",
+        "unsubscribe",
+        "sunsubscribe",
+        "punsubscribe",
+    ]
+)
+
 
 @dataclass
 class RedisConnection:
@@ -93,7 +104,10 @@ class RedisConnection:
                 async for data in stream:
                     self._parser.feed_bytes(data)
                     for item in self._parser:
-                        if isinstance(item, RESP3PushData):
+                        if (
+                            isinstance(item, RESP3PushData)
+                            and item.type not in PUBSUB_REPLIES
+                        ):
                             await self._handle_push_data(item)
                         elif isinstance(item, RESP3Attributes):
                             await self._handle_attribute(item)
@@ -111,16 +125,13 @@ class RedisConnection:
         return True
 
     async def execute_command(
-        self, command: str, *args: object, wait_reply: bool = True, decode: bool = True
+        self, command: str, *args: object, decode: bool = True
     ) -> RESP3Value:
         # Send the command
         payload = serialize_command(command, *args)
         # with fail_after(self.timeout):
         print("sent:", payload)
         await self._send_stream.send(payload)
-
-        if not wait_reply:
-            return None
 
         # Read back the response
         while True:

@@ -940,10 +940,8 @@ class RedisClient:
             exit_stack.enter_context(
                 conn.add_push_data_receiver(send, topics, "message")
             )
-            await conn.execute_command("SUBSCRIBE", *topics, wait_reply=False)
-            exit_stack.push_async_callback(
-                conn.execute_command, "UNSUBSCRIBE", *topics, wait_reply=False
-            )
+            await conn.execute_command("SUBSCRIBE", *topics)
+            exit_stack.push_async_callback(conn.execute_command, "UNSUBSCRIBE", *topics)
             yield receive
 
     @asynccontextmanager
@@ -972,9 +970,9 @@ class RedisClient:
             exit_stack.enter_context(
                 conn.add_push_data_receiver(send, shardchannels, "smessage")
             )
-            await conn.execute_command("SSUBSCRIBE", *shardchannels, wait_reply=False)
+            await conn.execute_command("SSUBSCRIBE", *shardchannels)
             exit_stack.push_async_callback(
-                conn.execute_command, "SUNSUBSCRIBE", *shardchannels, wait_reply=False
+                conn.execute_command, "SUNSUBSCRIBE", *shardchannels
             )
             yield receive
 
@@ -1004,8 +1002,8 @@ class RedisClient:
             exit_stack.enter_context(
                 conn.add_push_data_receiver(send, patterns, "pmessage")
             )
-            await conn.execute_command("PSUBSCRIBE", *patterns, wait_reply=False)
+            await conn.execute_command("PSUBSCRIBE", *patterns)
             exit_stack.push_async_callback(
-                conn.execute_command, "PUNSUBSCRIBE", *patterns, wait_reply=False
+                conn.execute_command, "PUNSUBSCRIBE", *patterns
             )
             yield receive
