@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import random
 import sys
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
+from itertools import chain
 from types import TracebackType
-from typing import Literal, cast
+from typing import Literal, cast, overload
 
 from anyio import create_memory_object_stream
 
 from ._connection import RedisConnectionPool, RedisConnectionPoolStatistics
 from ._resp3 import RESP3Value
+from ._utils import as_string
 
 if sys.version_info >= (3, 11):
     from typing import Self
@@ -38,7 +40,9 @@ class RedisClient:
         """Return statistics for the connection pool."""
         return self._pool.statistics()
 
-    async def execute_command(self, command: str, *args: object) -> RESP3Value:
+    async def execute_command(
+        self, command: str, *args: object, decode: bool = True
+    ) -> RESP3Value:
         """
         Execute a command on the Redis server.
 
@@ -47,10 +51,12 @@ class RedisClient:
 
         :param command: the command
         :param args: arguments to be sent
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
         :return: the return value of the command
 
         """
-        return await self._pool.execute_command(command.upper(), *args)
+        return await self._pool.execute_command(command.upper(), *args, decode=decode)
 
     #
     # Basic key operations
@@ -67,17 +73,65 @@ class RedisClient:
         """
         return cast(int, await self._pool.execute_command("DEL", key, *keys))
 
-    async def get(self, key: str) -> RESP3Value:
+    @overload
+    async def get(self, key: str, *, decode: Literal[False]) -> bytes | None:
+        ...
+
+    @overload
+    async def get(self, key: str, *, decode: Literal[True] = ...) -> str | None:
+        ...
+
+    async def get(self, key: str, *, decode: bool = True) -> str | bytes | None:
         """
         Retrieve the value of a key.
 
         :param key: the key whose value to retrieve
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
         :return: the value of the key, or ``None`` if the key did not exist
 
         .. seealso:: `Official manual page <https://redis.io/commands/get/>`_
 
         """
-        return await self._pool.execute_command("GET", key)
+        retval = await self._pool.execute_command("GET", key, decode=decode)
+        assert isinstance(retval, (str, bytes)) or retval is None
+        return retval
+
+    @overload
+    async def set(
+        self,
+        key: str,
+        value: str,
+        *,
+        nx: bool = False,
+        xx: bool = False,
+        get: bool = False,
+        ex: int | None = None,
+        px: int | None = None,
+        exat: int | None = None,
+        pxat: int | None = None,
+        keepttl: bool = False,
+        decode: Literal[True] = ...,
+    ) -> str | None:
+        ...
+
+    @overload
+    async def set(
+        self,
+        key: str,
+        value: str,
+        *,
+        nx: bool = False,
+        xx: bool = False,
+        get: bool = False,
+        ex: int | None = None,
+        px: int | None = None,
+        exat: int | None = None,
+        pxat: int | None = None,
+        keepttl: bool = False,
+        decode: Literal[False],
+    ) -> bytes | None:
+        ...
 
     async def set(
         self,
@@ -92,7 +146,8 @@ class RedisClient:
         exat: int | None = None,
         pxat: int | None = None,
         keepttl: bool = False,
-    ) -> RESP3Value:
+        decode: bool = True,
+    ) -> str | bytes | None:
         """
         Set ``key`` hold the string ``value``.
 
@@ -112,12 +167,14 @@ class RedisClient:
         :param pxat: specified UNIX timestamp for expiration, in milliseconds
         :param get: if ``True``, return the previous value of the key
         :param keepttl: if ``True``, retain the time to live associated with the key
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
         :return: the previous value, if ``get=True``
 
         .. seealso:: `Official manual page <https://redis.io/commands/set/>`_
 
         """
-        extra_args: list[RESP3Value] = []
+        extra_args: list[object] = []
         if nx:
             extra_args.append("NX")
         elif xx:
@@ -138,22 +195,47 @@ class RedisClient:
         if keepttl:
             extra_args.append("KEEPTTL")
 
-        return await self._pool.execute_command("SET", key, value, *extra_args)
+        retval = await self._pool.execute_command(
+            "SET", key, value, *extra_args, decode=decode
+        )
+        assert isinstance(retval, (str, bytes)) or retval is None
+        return retval
 
-    async def mget(self, *keys: str) -> list[RESP3Value]:
+    @overload
+    async def mget(self, *keys: str, decode: Literal[True] = ...) -> list[str]:
+        ...
+
+    @overload
+    async def mget(self, *keys: str, decode: Literal[False]) -> list[bytes]:
+        ...
+
+    async def mget(self, *keys: str, decode: bool = True) -> list[str] | list[bytes]:
         """
         Retrieve the values of multiple key.
 
         :param keys: the keys to retrieve
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
         :return: the key values, with ``None`` as a placeholder for keys that didn't
             exist
 
         .. seealso:: `Official manual page <https://redis.io/commands/mget/>`_
 
         """
-        retval = await self._pool.execute_command("MGET", *keys)
+        retval = await self._pool.execute_command("MGET", *keys, decode=decode)
         assert isinstance(retval, list)
-        return retval
+        return cast("list[str] | list[bytes]", retval)
+
+    async def mset(self, values: Mapping[str | bytes, object]) -> None:
+        """
+        Set the values of multiple keys.
+
+        :param values: a mapping of keys to their values
+
+        .. seealso:: `Official manual page <https://redis.io/commands/mset/>`_
+
+        """
+        await self._pool.execute_command("MSET", *chain.from_iterable(values.items()))
 
     @asynccontextmanager
     async def scan(
@@ -174,7 +256,6 @@ class RedisClient:
                     print(f"Found key: {key}")
 
         .. seealso:: `Official manual page <https://redis.io/commands/scan/>`_
-
         """
 
         async def iterate_keys(retval: RESP3Value) -> AsyncGenerator[str, None]:
@@ -211,6 +292,7 @@ class RedisClient:
     # List operations
     #
 
+    @overload
     async def blmove(
         self,
         source: str,
@@ -219,7 +301,33 @@ class RedisClient:
         whereto: Literal["left", "right"],
         *,
         timeout: float = 0,
-    ) -> RESP3Value:
+        decode: Literal[True] = ...,
+    ) -> str:
+        ...
+
+    @overload
+    async def blmove(
+        self,
+        source: str,
+        destination: str,
+        wherefrom: Literal["left", "right"],
+        whereto: Literal["left", "right"],
+        *,
+        timeout: float = 0,
+        decode: Literal[False],
+    ) -> bytes:
+        ...
+
+    async def blmove(
+        self,
+        source: str,
+        destination: str,
+        wherefrom: Literal["left", "right"],
+        whereto: Literal["left", "right"],
+        *,
+        timeout: float = 0,
+        decode: bool = True,
+    ) -> str | bytes:
         """
         Atomically move an element from one array to another.
 
@@ -232,44 +340,72 @@ class RedisClient:
         :param whereto: either ``left`` or ``right``
         :param timeout: seconds to wait for an element to appear on ``source``; 0 to
             wait indefinitely
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
         :return: the element being popped from ``source`` and moved to ``destination``,
             or ``None`` if the timeout was reached
 
         .. seealso:: `Official manual page <https://redis.io/commands/blmove/>`_
 
         """
-        return await self._pool.execute_command(
-            "BLMOVE", source, destination, wherefrom, whereto, timeout
+        retval = await self._pool.execute_command(
+            "BLMOVE", source, destination, wherefrom, whereto, timeout, decode=decode
         )
+        assert isinstance(retval, (str, bytes))
+        return retval
 
     async def blmpop(
         self,
-        numkeys: int,
         wherefrom: Literal["left", "right"],
         *keys: str,
+        count: int | None = None,
         timeout: float = 0,
-    ) -> list[RESP3Value]:
+        decode: bool = True,
+    ) -> list[str] | list[bytes]:
         """
-        Pops one or more elements from one of the given lists.
+        Remove and return one or more elements from one of the given lists.
 
         Unlike :meth:`lmpop`, this method first waits for an element to appear on
         any of the lists if all of them are empty.
 
-        :param numkeys: maximum number of
-        :param wherefrom: either ``left`` or ``right``
+        :param wherefrom: ``left`` to remove an element from the beginning of the list,
+            ``right`` to remove one from the end
+        :param keys
+        :param count: the maximum number of elements to remove (omit
         :param timeout: seconds to wait for an element to appear on ``source``; 0 to
             wait indefinitely
-        :return: the element being popped from ``source`` and moved to ``destination``,
-            or ``None`` if the timeout was reached
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
+        :return: the removed elements
 
         .. seealso:: `Official manual page <https://redis.io/commands/blmpop/>`_
 
         """
-        retval = await self._pool.execute_command("BLMPOP", *keys, timeout)
-        assert isinstance(retval, list)
-        return retval
+        args: list[object] = []
+        if count is not None:
+            args.extend(["COUNT", count])
 
-    async def blpop(self, *keys: str, timeout: float = 0) -> tuple[str, RESP3Value]:
+        retval = await self._pool.execute_command(
+            "BLMPOP", timeout, len(keys), *keys, wherefrom.upper(), *args, decode=decode
+        )
+        assert isinstance(retval, list)
+        return cast("list[str] | list[bytes]", retval)
+
+    @overload
+    async def blpop(
+        self, *keys: str, timeout: float = 0, decode: Literal[True] = ...
+    ) -> tuple[str, str] | tuple[None, None]:
+        ...
+
+    @overload
+    async def blpop(
+        self, *keys: str, timeout: float = 0, decode: Literal[False]
+    ) -> tuple[str, bytes] | tuple[None, None]:
+        ...
+
+    async def blpop(
+        self, *keys: str, timeout: float = 0, decode: bool = True
+    ) -> tuple[str, str | bytes] | tuple[None, None]:
         """
         Remove and return the first element from one of the given lists.
 
@@ -279,17 +415,39 @@ class RedisClient:
         :param keys: the lists to pop from
         :param timeout: seconds to wait for an element to appear on any of the lists; 0
             to wait indefinitely
-        :return: the element that was removed, or ``None`` if the timeout was reached
-            and all the lists remained empty
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
+        :return: a tuple of (list name, the removed element), or tuple of
+            ``(None, None)`` if the timeout was reached
 
         .. seealso:: `Official manual page <https://redis.io/commands/blpop/>`_
 
         """
-        retval = await self._pool.execute_command("BLPOP", *keys, timeout)
-        assert isinstance(retval, list) and isinstance(retval, str)
-        return tuple(retval)
+        retval = await self._pool.execute_command(
+            "BLPOP", *keys, timeout, decode=decode
+        )
+        assert isinstance(retval, list) and len(retval) == 2
+        if retval[0] is None:
+            return None, None
 
-    async def brpop(self, *keys: str, timeout: float = 0) -> RESP3Value:
+        assert isinstance(retval[1], (str, bytes))
+        return as_string(retval[0]), retval[1]
+
+    @overload
+    async def brpop(
+        self, *keys: str, timeout: float = 0, decode: Literal[True] = ...
+    ) -> tuple[str, str] | tuple[None, None]:
+        ...
+
+    @overload
+    async def brpop(
+        self, *keys: str, timeout: float = 0, decode: Literal[False]
+    ) -> tuple[str, bytes] | tuple[None, None]:
+        ...
+
+    async def brpop(
+        self, *keys: str, timeout: float = 0, decode: bool = True
+    ) -> tuple[str, str | bytes] | tuple[None, None]:
         """
         Remove and return the last element from one of the given lists.
 
@@ -299,13 +457,47 @@ class RedisClient:
         :param keys: the lists to pop from
         :param timeout: seconds to wait for an element to appear on any of the lists; 0
             to wait indefinitely
-        :return: the element that was removed, or ``None`` if the timeout was reached
-            and all the lists remained empty
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
+        :return: a tuple of (list name, the removed element), or tuple of
+            ``(None, None)`` if the timeout was reached
 
         .. seealso:: `Official manual page <https://redis.io/commands/brpop/>`_
 
         """
-        return await self._pool.execute_command("BRPOP", *keys, timeout)
+        retval = await self._pool.execute_command(
+            "BRPOP", *keys, timeout, decode=decode
+        )
+        assert isinstance(retval, list) and len(retval) == 2
+        if retval[0] is None:
+            return None, None
+
+        assert isinstance(retval[1], (str, bytes))
+        return as_string(retval[0]), retval[1]
+
+    @overload
+    async def lmove(
+        self,
+        source: str,
+        destination: str,
+        wherefrom: Literal["left", "right"],
+        whereto: Literal["left", "right"],
+        *,
+        decode: Literal[True] = ...,
+    ) -> str | None:
+        ...
+
+    @overload
+    async def lmove(
+        self,
+        source: str,
+        destination: str,
+        wherefrom: Literal["left", "right"],
+        whereto: Literal["left", "right"],
+        *,
+        decode: Literal[False],
+    ) -> bytes | None:
+        ...
 
     async def lmove(
         self,
@@ -313,7 +505,9 @@ class RedisClient:
         destination: str,
         wherefrom: Literal["left", "right"],
         whereto: Literal["left", "right"],
-    ) -> RESP3Value:
+        *,
+        decode: bool = True,
+    ) -> str | bytes | None:
         """
         Atomically move an element from one array to another.
 
@@ -321,35 +515,51 @@ class RedisClient:
         :param destination: the destination key
         :param wherefrom: either ``left`` or ``right``
         :param whereto: either ``left`` or ``right``
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
         :return: the element being popped from ``source`` and moved to ``destination``,
             or ``None`` if ``source`` was empty
 
         .. seealso:: `Official manual page <https://redis.io/commands/lmove/>`_
 
         """
-        return await self._pool.execute_command(
-            "LMOVE", source, destination, wherefrom, whereto
+        retval = await self._pool.execute_command(
+            "LMOVE", source, destination, wherefrom, whereto, decode=decode
         )
+        assert isinstance(retval, (str, bytes)) or retval is None
+        return retval
 
-    async def lindex(self, key: str, index: int) -> RESP3Value:
+    @overload
+    async def lindex(self, key: str, index: int, *, decode: Literal[True] = ...) -> str:
+        ...
+
+    @overload
+    async def lindex(self, key: str, index: int, *, decode: Literal[False]) -> bytes:
+        ...
+
+    async def lindex(self, key: str, index: int, *, decode: bool = True) -> str | bytes:
         """
         Return the element at index ``index`` in key ``key``.
 
         :param key: the list to get the element from
         :param index: numeric index on the list
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
         :return: the element at the specified index
 
         .. seealso:: `Official manual page <https://redis.io/commands/lindex/>`_
 
         """
-        return await self._pool.execute_command("LINDEX", key, index)
+        retval = await self._pool.execute_command("LINDEX", key, index, decode=decode)
+        assert isinstance(retval, (str, bytes))
+        return retval
 
     async def linsert(
         self,
         key: str,
         where: Literal["before", "after"],
-        pivot: RESP3Value,
-        element: RESP3Value,
+        pivot: object,
+        element: object,
     ) -> int:
         """
         Insert ``element`` to the list ``key`` either before or after ``pivot``.
@@ -385,35 +595,67 @@ class RedisClient:
         assert isinstance(retval, int)
         return retval
 
-    async def lpop(self, key: str, count: int = 1) -> list[RESP3Value]:
-        """
-        Remove and return the first element(s) value of a key.
+    @overload
+    async def lpop(
+        self, key: str, count: int = 1, *, decode: Literal[True] = ...
+    ) -> list[str]:
+        ...
 
-        :param key: the array to pop elements from
-        :param count: the number of elements to pop
-        :return: the list of popped elements
+    @overload
+    async def lpop(
+        self, key: str, count: int = 1, *, decode: Literal[False]
+    ) -> list[bytes]:
+        ...
+
+    async def lpop(
+        self, key: str, count: int = 1, *, decode: bool = True
+    ) -> list[str] | list[bytes]:
+        """
+        Remove and return the first element(s) from a list.
+
+        :param key: the list to remove elements from
+        :param count: the number of elements to remove
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
+        :return: the list of removed elements
 
         .. seealso:: `Official manual page <https://redis.io/commands/lpop/>`_
 
         """
-        retval = await self._pool.execute_command("LPOP", key, count)
+        retval = await self._pool.execute_command("LPOP", key, count, decode=decode)
         assert isinstance(retval, list)
-        return retval
+        return cast("list[str] | list[bytes]", retval)
 
-    async def rpop(self, key: str, count: int = 1) -> list[RESP3Value]:
+    @overload
+    async def rpop(
+        self, key: str, count: int = 1, *, decode: Literal[True] = ...
+    ) -> list[str]:
+        ...
+
+    @overload
+    async def rpop(
+        self, key: str, count: int = 1, *, decode: Literal[False]
+    ) -> list[bytes]:
+        ...
+
+    async def rpop(
+        self, key: str, count: int = 1, *, decode: bool = True
+    ) -> list[str] | list[bytes]:
         """
         Remove and return the last element(s) value of a key.
 
         :param key: the array to pop elements from
         :param count: the number of elements to pop
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
         :return: the list of popped elements
 
         .. seealso:: `Official manual page <https://redis.io/commands/rpop/>`_
 
         """
-        retval = await self._pool.execute_command("RPOP", key, count)
+        retval = await self._pool.execute_command("RPOP", key, count, decode=decode)
         assert isinstance(retval, list)
-        return retval
+        return cast("list[str] | list[bytes]", retval)
 
     async def rpush(self, key: str, *values: object) -> int:
         """
@@ -452,27 +694,40 @@ class RedisClient:
     # String operations
     #
 
-    async def getrange(self, key: str, start: int, end: int) -> str:
+    async def getrange(
+        self, key: str, start: int, end: int, decode: bool = True
+    ) -> str | bytes:
         """
         Return a substring of the string value stored at ``key``.
 
         :param key: the key to retrieve
         :param start: index of the starting character (inclusive)
         :param end: index of the last character (inclusive)
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
         :return: the substring
 
         .. seealso:: `Official manual page <https://redis.io/commands/getrange/>`_
 
         """
-        return cast(str, await self._pool.execute_command("GETRANGE", key, start, end))
+        return cast(
+            str,
+            await self._pool.execute_command(
+                "GETRANGE", key, start, end, decode=decode
+            ),
+        )
 
-    async def setrange(self, key: str, offset: int, value: str) -> int:
+    async def setrange(
+        self, key: str, offset: int, value: str, decode: bool = True
+    ) -> int:
         """
         Overwrite part of the specific string key.
 
         :param key: the key to modify
         :param offset: offset (in bytes) where to place the replacement string
         :param value: the string to place at the offset
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
         :return: the length of the string after the modification
 
         .. warning:: Take care when modifying multibyte (outside of the ASCII range)
@@ -481,7 +736,9 @@ class RedisClient:
         .. seealso:: `Official manual page <https://redis.io/commands/setrange/>`_
 
         """
-        retval = await self._pool.execute_command("SETRANGE", key, offset, value)
+        retval = await self._pool.execute_command(
+            "SETRANGE", key, offset, value, decode=decode
+        )
         assert isinstance(retval, int)
         return retval
 
@@ -489,38 +746,146 @@ class RedisClient:
     # Hash map operations
     #
 
-    async def hget(self, key: str, field: str) -> RESP3Value:
+    async def hdel(self, key: str, field: str) -> int:
         """
-        Retrieve the values of a field in a hash stored at ``key``.
+        Delete a field in the given hash map.
+
+        :param key: the hash map
+        :param field: the fields to delete
+        :return: 1 if the hash map contained the given field, or 0 if either the field
+            or the hash map did not exist
+
+        .. seealso:: `Official manual page <https://redis.io/commands/hdel/>`_
+
+        """
+        retval = await self._pool.execute_command("HDEL", key, field)
+        assert isinstance(retval, int)
+        return retval
+
+    @overload
+    async def hget(
+        self, key: str, field: str, decode: Literal[True] = ...
+    ) -> str | None:
+        ...
+
+    @overload
+    async def hget(self, key: str, field: str, decode: Literal[False]) -> bytes | None:
+        ...
+
+    async def hget(
+        self, key: str, field: str, decode: bool = True
+    ) -> str | bytes | None:
+        """
+        Retrieve the value of a field in a hash map stored at ``key``.
 
         :param key: the hash to retrieve fields from
-        :param field: the fields to retrieve
+        :param field: the field to retrieve
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
         :return: the key values, with ``None`` as a placeholder for fields that didn't
             exist
 
         .. seealso:: `Official manual page <https://redis.io/commands/hget/>`_
 
         """
-        return await self._pool.execute_command("HMGET", key, field)
+        retval = await self._pool.execute_command("HGET", key, field, decode=decode)
+        assert isinstance(retval, (str, bytes)) or retval is None
+        return retval
 
-    async def hmget(self, key: str, *fields: str) -> list[RESP3Value]:
+    @overload
+    async def hmget(
+        self, key: str, *fields: str, decode: Literal[True] = ...
+    ) -> list[str | None] | list[bytes | None]:
+        ...
+
+    @overload
+    async def hmget(
+        self, key: str, *fields: str, decode: Literal[False]
+    ) -> list[str | None] | list[bytes | None]:
+        ...
+
+    async def hmget(
+        self, key: str, *fields: str, decode: bool = True
+    ) -> list[str | None] | list[bytes | None]:
         """
         Retrieve the values of multiple fields in a hash stored at ``key``.
 
         :param key: the hash to retrieve fields from
         :param fields: the fields to retrieve
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False``to leave them as is
         :return: the key values, with ``None`` as a placeholder for fields that didn't
             exist
 
         .. seealso:: `Official manual page <https://redis.io/commands/hmget/>`_
 
         """
-        retval = await self._pool.execute_command("HMGET", key, *fields)
+        retval = await self._pool.execute_command("HMGET", key, *fields, decode=decode)
         assert isinstance(retval, list)
+        return cast("list[str | None] | list[bytes | None]", retval)
+
+    async def hset(self, key: str, values: Mapping[str | bytes, object]) -> int:
+        """
+        Set the specified field values in the given hash map.
+
+        :param key: the hash map to set the values in
+        :param values: a mapping of field name to value
+        :return: the number of fields that were added
+
+        Usage::
+
+            await client.hset("somekey", {"key1": value1, "key2": value2})
+
+        .. seealso:: `Official manual page <https://redis.io/commands/hset/>`_
+
+        """
+        retval = await self._pool.execute_command(
+            "HSET", key, *chain.from_iterable(values.items())
+        )
+        assert isinstance(retval, int)
         return retval
 
     #
-    # Pub/Sub operations
+    # Miscellaneous operations
+    #
+
+    async def flushall(self, sync: bool = True) -> None:
+        """
+        Clears all keys in all databases.
+
+        :param sync: if ``True``, flush the databases synchronously;
+            if ``False``, flush them asynchronously.
+
+        .. seealso:: `Official manual page <https://redis.io/commands/flushall/>`_
+
+        """
+        mode = "SYNC" if sync else "ASYNC"
+        await self._pool.execute_command("FLUSHALL", mode)
+
+    async def flushdb(self, sync: bool = True) -> None:
+        """
+        Clears all keys in the currently selected database.
+
+        :param sync: if ``True``, flush the database synchronously;
+            if ``False``, flush it asynchronously.
+
+        .. seealso:: `Official manual page <https://redis.io/commands/flushdb/>`_
+
+        """
+        mode = "SYNC" if sync else "ASYNC"
+        await self._pool.execute_command("FLUSHDB", mode)
+
+    async def ping(self) -> None:
+        nonce = str(random.randint(0, 100000))
+        retval = await self._pool.execute_command("PING", nonce)
+        if retval != nonce:
+            raise RuntimeError(
+                f"PING command returned an unexpected payload (got {retval!r}, "
+                f"expected {nonce!r}"
+            )
+
+    #
+    # Publish/Subscribe operations
     #
 
     async def publish(self, channel: str, message: str | bytes) -> int:
@@ -533,6 +898,19 @@ class RedisClient:
 
         """
         retval = await self.execute_command("PUBLISH", channel, message)
+        assert isinstance(retval, int)
+        return retval
+
+    async def spublish(self, shardchannel: str, message: str | bytes) -> int:
+        """
+        Publish a message to the given shard channel.
+
+        :param shardchannel: name of the shard channel to publish to
+        :param message: the message to publish
+        :return: the number of clients that received the message
+
+        """
+        retval = await self.execute_command("SPUBLISH", shardchannel, message)
         assert isinstance(retval, int)
         return retval
 
@@ -631,42 +1009,3 @@ class RedisClient:
                 conn.execute_command, "PUNSUBSCRIBE", *patterns, wait_reply=False
             )
             yield receive
-
-    #
-    # Miscellaneous operations
-    #
-
-    async def flushall(self, sync: bool = True) -> None:
-        """
-        Clears all keys in all databases.
-
-        :param sync: if ``True``, flush the databases synchronously;
-            if ``False``, flush them asynchronously.
-
-        .. seealso:: `Official manual page <https://redis.io/commands/flushall/>`_
-
-        """
-        mode = "SYNC" if sync else "ASYNC"
-        await self._pool.execute_command("FLUSHALL", mode)
-
-    async def flushdb(self, sync: bool = True) -> None:
-        """
-        Clears all keys in the currently selected database.
-
-        :param sync: if ``True``, flush the database synchronously;
-            if ``False``, flush it asynchronously.
-
-        .. seealso:: `Official manual page <https://redis.io/commands/flushdb/>`_
-
-        """
-        mode = "SYNC" if sync else "ASYNC"
-        await self._pool.execute_command("FLUSHDB", mode)
-
-    async def ping(self) -> None:
-        nonce = str(random.randint(0, 100000)).encode("ascii")
-        retval = await self._pool.execute_command("PING", nonce)
-        if retval != nonce:
-            raise RuntimeError(
-                f"PING command returned an unexpected payload (got {retval!r}, "
-                f"expected {nonce!r}"
-            )

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
+from collections.abc import MutableSequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Dict
@@ -18,12 +18,12 @@ else:
 
 RESP3Value: TypeAlias = (
     "None | str | bytes | float | bool | VerbatimString | Decimal | RESP3PushData "
-    "| RESP3Attribute | RESP3SimpleError | RESP3BlobError | list[RESP3Value] "
+    "| RESP3Attributes | RESP3SimpleError | RESP3BlobError | list[RESP3Value] "
     "| set[RESP3Value] | dict[RESP3Value, RESP3Value]"
 )
 
 
-@dataclass(frozen=True)
+@dataclass
 class RESP3PushData:
     """
     Encapsulates push data (either pub-sub or ``MONITOR``).
@@ -33,15 +33,15 @@ class RESP3PushData:
         Type of the push data being sent. Typically ``monitor`` or ``pubsub``.
 
     .. attribute:: data
-        :type: Sequence[RESP3Value]
+        :type: MutableSequence[RESP3Value]
         Type-dependent subtype of the push data being sent.
     """
 
     type: str
-    data: Sequence[RESP3Value]
+    data: MutableSequence[RESP3Value]
 
 
-class RESP3Attribute(Dict[RESP3Value, RESP3Value]):
+class RESP3Attributes(Dict[RESP3Value, RESP3Value]):
     """A map of auxiliary response info, transmitted as out-of-band data."""
 
 

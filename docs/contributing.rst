@@ -7,8 +7,10 @@ guidelines.
 When you make a pull request against the main AnyIO codebase, Github runs the AnyIO test
 suite against your modified code. Before making a pull request, you should ensure that
 the modified code passes tests locally. To that end, the use of tox_ is recommended. The
-default tox run first runs ``pre-commit`` and then the actual test suite. To run the
-checks on all environments in parallel, invoke tox with ``tox -p``.
+default tox run first runs ``pre-commit`` and then the actual test suite.
+
+.. note:: Do not use ``tox -p`` (parallel mode) when running against multiple tox
+    environments, as the integration tests cannot be safely run against the same server.
 
 To build the documentation, run ``tox -e docs`` which will generate a directory named
 ``build`` in which you may view the formatted HTML documentation.

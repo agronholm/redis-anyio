@@ -1,6 +1,7 @@
 from ._client import RedisClient as RedisClient
+from ._connection import RedisConnectionPoolStatistics as RedisConnectionPoolStatistics
 from ._pipeline import RedisPipeline as RedisPipeline
-from ._resp3 import RESP3Attribute as RESP3Attribute
+from ._resp3 import RESP3Attributes as RESP3Attributes
 from ._resp3 import RESP3BlobError as RESP3BlobError
 from ._resp3 import RESP3ParseError as RESP3ParseError
 from ._resp3 import RESP3Parser as RESP3Parser

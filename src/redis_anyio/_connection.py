@@ -11,8 +11,8 @@ from types import TracebackType
 
 from anyio import (
     BrokenResourceError,
-    CapacityLimiter,
     ClosedResourceError,
+    Semaphore,
     aclose_forcefully,
     connect_tcp,
     create_memory_object_stream,
@@ -26,7 +26,7 @@ from tenacity import AsyncRetrying, retry_if_exception_type
 
 from ._pipeline import RedisPipeline
 from ._resp3 import (
-    RESP3Attribute,
+    RESP3Attributes,
     RESP3BlobError,
     RESP3Parser,
     RESP3PushData,
@@ -34,6 +34,7 @@ from ._resp3 import (
     RESP3Value,
     serialize_command,
 )
+from ._resp3._parser import decode_bytestrings
 
 if sys.version_info >= (3, 11):
     from typing import Self
@@ -80,7 +81,7 @@ class RedisConnection:
                 for stream in streams:
                     tg.start_soon(stream.send, value)
 
-    async def _handle_attribute(self, attribute: RESP3Attribute) -> None:
+    async def _handle_attribute(self, attribute: RESP3Attributes) -> None:
         pass  # Drop attributes on the floor for now
 
     async def run(self, stream: AnyByteStream, *, task_status: TaskStatus) -> None:
@@ -94,7 +95,7 @@ class RedisConnection:
                     for item in self._parser:
                         if isinstance(item, RESP3PushData):
                             await self._handle_push_data(item)
-                        elif isinstance(item, RESP3Attribute):
+                        elif isinstance(item, RESP3Attributes):
                             await self._handle_attribute(item)
                         else:
                             await send.send(item)
@@ -110,7 +111,7 @@ class RedisConnection:
         return True
 
     async def execute_command(
-        self, command: str, *args: object, wait_reply: bool = True
+        self, command: str, *args: object, wait_reply: bool = True, decode: bool = True
     ) -> RESP3Value:
         # Send the command
         payload = serialize_command(command, *args)
@@ -127,6 +128,9 @@ class RedisConnection:
             response = await self._response_stream.receive()
             if isinstance(response, Exception):
                 raise response
+
+            if decode:
+                return decode_bytestrings(response)
 
             return response
 
@@ -169,6 +173,28 @@ class RedisConnection:
 
 @dataclass(frozen=True)
 class RedisConnectionPoolStatistics:
+    """
+    .. attribute:: max_connections
+        :type: int
+
+        This is the maximum number of connections the connection pool allows.
+
+    .. attribute:: total_connections
+        :type: int
+
+        This is the total number of connections in the pool (idle + busy).
+
+    .. attribute:: idle_connections
+        :type: int
+
+        This is the maximum number of open connections available to be acquired.
+
+    .. attribute:: busy_connections
+        :type: int
+
+        This is the maximum number of connections currently acquired from the pool.
+    """
+
     max_connections: int
     total_connections: int
     idle_connections: int
@@ -185,15 +211,15 @@ class RedisConnectionPool:
     username: str | None = None
     password: str | None = None
     ssl_context: SSLContext | None = None
-    capacity: int = 2**31
+    capacity: int = 2**16 - 1  # TCP port numbers are 16 bit unsigned ints
     _closed: bool = field(init=False, default=False)
     _idle_connections: deque[RedisConnection] = field(init=False, default_factory=deque)
-    _limiter: CapacityLimiter = field(init=False)
+    _capacity_semaphore: Semaphore = field(init=False)
     _parser: RESP3Parser = field(init=False, default_factory=RESP3Parser)
     _connections_task_group: TaskGroup = field(init=False)
 
     async def __aenter__(self) -> Self:
-        self._limiter = CapacityLimiter(self.capacity)
+        self._capacity_semaphore = Semaphore(self.capacity, max_value=self.capacity)
         self._connections_task_group = create_task_group()
         await self._connections_task_group.__aenter__()
         return self
@@ -211,7 +237,7 @@ class RedisConnectionPool:
 
     def statistics(self) -> RedisConnectionPoolStatistics:
         """Return statistics about the max/busy/idle connections in this pool."""
-        acquired_connections = self._limiter.statistics().borrowed_tokens
+        acquired_connections = self.capacity - self._capacity_semaphore.value
         idle_connections = len(self._idle_connections)
         return RedisConnectionPoolStatistics(
             max_connections=self.capacity,
@@ -225,7 +251,7 @@ class RedisConnectionPool:
         if self._closed:
             raise RuntimeError("This pool is closed")
 
-        async with self._limiter:
+        async with self._capacity_semaphore:
             while self._idle_connections:
                 conn = self._idle_connections.popleft()
                 if await conn.validate():
@@ -275,13 +301,15 @@ class RedisConnectionPool:
 
         return conn
 
-    async def execute_command(self, command: str, *args: object) -> RESP3Value:
+    async def execute_command(
+        self, command: str, *args: object, decode: bool = True
+    ) -> RESP3Value:
         async for attempt in AsyncRetrying(
             sleep=sleep, retry=retry_if_exception_type(BrokenResourceError)
         ):
             with attempt:
                 async with self.acquire() as conn:
-                    return await conn.execute_command(command, *args)
+                    return await conn.execute_command(command, *args, decode=decode)
 
         raise AssertionError("Execution should never get to this point")
 

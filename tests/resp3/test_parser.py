@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from redis_anyio import (
-    RESP3Attribute,
+    RESP3Attributes,
     RESP3BlobError,
     RESP3ParseError,
     RESP3Parser,
@@ -90,7 +90,7 @@ def parser() -> RESP3Parser:
             id="pushdata_message",
         ),
         pytest.param(
-            b"|1\r\n+Test\r\n:7\r\n", RESP3Attribute({b"Test": 7}), id="attribute"
+            b"|1\r\n+Test\r\n:7\r\n", RESP3Attributes({b"Test": 7}), id="attribute"
         ),
     ],
 )

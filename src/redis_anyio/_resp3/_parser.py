@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from ._types import (
-    RESP3Attribute,
+    RESP3Attributes,
     RESP3BlobError,
     RESP3ParseError,
     RESP3PushData,
@@ -282,10 +282,10 @@ class PushDataParser(SubParser):
 class AttributeParser(SubParser):
     map_parser: MapParser
 
-    def feed_token(self, data: bytes) -> RESP3Attribute | _NotEnoughData:
+    def feed_token(self, data: bytes) -> RESP3Attributes | _NotEnoughData:
         retval = self.map_parser.feed_token(data)
         if isinstance(retval, dict):
-            return RESP3Attribute(retval)
+            return RESP3Attributes(retval)
 
         return not_enough_data
 
@@ -405,3 +405,20 @@ class RESP3Parser:
     def feed_bytes(self, data: bytes) -> None:
         print("received:", data)
         self._buffer += data
+
+
+def decode_bytestrings(value: RESP3Value) -> RESP3Value:
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    elif isinstance(value, list):
+        return [decode_bytestrings(x) for x in value]
+    elif isinstance(value, set):
+        return {decode_bytestrings(x) for x in value}
+    elif isinstance(value, dict):
+        return {decode_bytestrings(k): decode_bytestrings(v) for k, v in value.items()}
+    elif isinstance(value, RESP3PushData):
+        value.data = [decode_bytestrings(x) for x in value.data]
+    elif isinstance(value, RESP3Attributes):
+        return RESP3Attributes(value)
+
+    return value
