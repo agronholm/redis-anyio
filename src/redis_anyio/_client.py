@@ -6,18 +6,20 @@ from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
 from itertools import chain
 from types import TracebackType
-from typing import Literal, cast, overload
+from typing import TYPE_CHECKING, Literal, cast, overload
 
 from anyio import create_memory_object_stream
 
 from ._connection import RedisConnectionPool, RedisConnectionPoolStatistics
-from ._resp3 import RESP3Value
 from ._utils import as_string
 
 if sys.version_info >= (3, 11):
     from typing import Self
 else:
     from typing_extensions import Self
+
+if TYPE_CHECKING:
+    from ._resp3 import RESP3Value
 
 
 class RedisClient:
@@ -30,9 +32,9 @@ class RedisClient:
 
     async def __aexit__(
         self,
-        exc_type: type[BaseException],
-        exc_val: BaseException,
-        exc_tb: TracebackType,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         return await self._pool.__aexit__(exc_type, exc_val, exc_tb)
 

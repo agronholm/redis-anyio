@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
-from ._types import RESP3Value
+if TYPE_CHECKING:
+    from ._types import RESP3Value
 
 SERIALIZED_NULL = b"_\r\n"
 

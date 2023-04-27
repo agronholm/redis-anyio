@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from ._types import (
     RESP3Attributes,
@@ -10,7 +11,6 @@ from ._types import (
     RESP3ParseError,
     RESP3PushData,
     RESP3SimpleError,
-    RESP3Value,
     VerbatimString,
 )
 
@@ -18,6 +18,9 @@ if sys.version_info >= (3, 11):
     from typing import Self
 else:
     from typing_extensions import Self
+
+if TYPE_CHECKING:
+    from ._types import RESP3Value
 
 
 class _NotEnoughData:

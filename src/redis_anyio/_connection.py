@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from ssl import SSLContext
 from types import TracebackType
+from typing import TYPE_CHECKING
 
 from anyio import (
     BrokenResourceError,
@@ -31,7 +32,6 @@ from ._resp3 import (
     RESP3Parser,
     RESP3PushData,
     RESP3SimpleError,
-    RESP3Value,
     serialize_command,
 )
 from ._resp3._parser import decode_bytestrings
@@ -40,6 +40,9 @@ if sys.version_info >= (3, 11):
     from typing import Self
 else:
     from typing_extensions import Self
+
+if TYPE_CHECKING:
+    from ._resp3 import RESP3Value
 
 PUBSUB_REPLIES = frozenset(
     [
@@ -237,9 +240,9 @@ class RedisConnectionPool:
 
     async def __aexit__(
         self,
-        exc_type: type[BaseException],
-        exc_val: BaseException,
-        exc_tb: TracebackType,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         self._closed = True
         self._connections_task_group.cancel_scope.cancel()
