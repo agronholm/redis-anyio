@@ -3,14 +3,16 @@ from __future__ import annotations
 import random
 import sys
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import asynccontextmanager
 from itertools import chain
 from types import TracebackType
 from typing import TYPE_CHECKING, Literal, cast, overload
 
-from anyio import create_memory_object_stream
-
-from ._connection import RedisConnectionPool, RedisConnectionPoolStatistics
+from ._connection import (
+    RedisConnectionPool,
+    RedisConnectionPoolStatistics,
+    Subscription,
+)
 from ._utils import as_string
 
 if sys.version_info >= (3, 11):
@@ -916,40 +918,72 @@ class RedisClient:
         assert isinstance(retval, int)
         return retval
 
-    @asynccontextmanager
-    async def subscribe(
-        self, *topics: str, decode: bool = True
-    ) -> AsyncGenerator[AsyncIterator[tuple[str, bytes]], None]:
+    @overload
+    def subscribe(
+        self, *channels: str, decode: Literal[True] = ...
+    ) -> Subscription[str]:
+        ...
+
+    @overload
+    def subscribe(self, *channels: str, decode: Literal[False]) -> Subscription[bytes]:
+        ...
+
+    @overload
+    def subscribe(
+        self, *channels: str, decode: bool
+    ) -> Subscription[str] | Subscription[bytes]:
+        ...
+
+    def subscribe(
+        self, *channels: str, decode: bool = True
+    ) -> Subscription[str] | Subscription[bytes]:
         """
-        Subscribe to one or more topics.
+        Subscribe to one or more channels.
 
         :param decode: if ``True``, decode the messages into strings using the
             UTF-8 encoding. If ``False``, yield raw bytes instead.
 
         Usage::
 
-            async with client.subscribe("Topic1", "Topic2") as subscription:
-                async for topic, data in subscription:
-                    ...  # Received data on <topic>
+            async with client.subscribe("channel1", "channel2") as subscription:
+                async for channel, data in subscription:
+                    ...  # Received data on <channel>
 
         .. seealso:: `Official manual page <https://redis.io/commands/subscribe/>`_
 
         """
-        async with AsyncExitStack() as exit_stack:
-            conn = await exit_stack.enter_async_context(self._pool.acquire())
-            send, receive = create_memory_object_stream(0)
-            await exit_stack.enter_async_context(receive)
-            exit_stack.enter_context(
-                conn.add_push_data_receiver(send, topics, "message")
-            )
-            await conn.execute_command("SUBSCRIBE", *topics)
-            exit_stack.push_async_callback(conn.execute_command, "UNSUBSCRIBE", *topics)
-            yield receive
+        args = (
+            self._pool,
+            channels,
+            "subscribe",
+            "message",
+            decode,
+            "SUBSCRIBE",
+            "UNSUBSCRIBE",
+        )
+        return Subscription[str](*args) if decode else Subscription[bytes](*args)
 
-    @asynccontextmanager
-    async def ssubscribe(
+    @overload
+    def ssubscribe(
+        self, *shardchannels: str, decode: Literal[True] = ...
+    ) -> Subscription[str]:
+        ...
+
+    @overload
+    def ssubscribe(
+        self, *shardchannels: str, decode: Literal[False]
+    ) -> Subscription[bytes]:
+        ...
+
+    @overload
+    def ssubscribe(
+        self, *shardchannels: str, decode: bool
+    ) -> Subscription[str] | Subscription[bytes]:
+        ...
+
+    def ssubscribe(
         self, *shardchannels: str, decode: bool = True
-    ) -> AsyncGenerator[AsyncIterator[tuple[str, bytes]], None]:
+    ) -> Subscription[str] | Subscription[bytes]:
         """
         Subscribe to one or more shard channels.
 
@@ -965,23 +999,20 @@ class RedisClient:
         .. seealso:: `Official manual page <https://redis.io/commands/ssubscribe/>`_
 
         """
-        async with AsyncExitStack() as exit_stack:
-            conn = await exit_stack.enter_async_context(self._pool.acquire())
-            send, receive = create_memory_object_stream(0)
-            await exit_stack.enter_async_context(receive)
-            exit_stack.enter_context(
-                conn.add_push_data_receiver(send, shardchannels, "smessage")
-            )
-            await conn.execute_command("SSUBSCRIBE", *shardchannels)
-            exit_stack.push_async_callback(
-                conn.execute_command, "SUNSUBSCRIBE", *shardchannels
-            )
-            yield receive
+        args = (
+            self._pool,
+            shardchannels,
+            "ssubscribe",
+            "smessage",
+            decode,
+            "SSUBSCRIBE",
+            "SUNSUBSCRIBE",
+        )
+        return Subscription[str](*args) if decode else Subscription[bytes](*args)
 
-    @asynccontextmanager
-    async def psubscribe(
+    def psubscribe(
         self, *patterns: str, decode: bool = True
-    ) -> AsyncGenerator[AsyncIterator[tuple[str, bytes]], None]:
+    ) -> Subscription[str] | Subscription[bytes]:
         """
         Subscribe to one or more topic patterns.
 
@@ -997,15 +1028,13 @@ class RedisClient:
         .. seealso:: `Official manual page <https://redis.io/commands/psubscribe/>`_
 
         """
-        async with AsyncExitStack() as exit_stack:
-            conn = await exit_stack.enter_async_context(self._pool.acquire())
-            send, receive = create_memory_object_stream(0)
-            await exit_stack.enter_async_context(receive)
-            exit_stack.enter_context(
-                conn.add_push_data_receiver(send, patterns, "pmessage")
-            )
-            await conn.execute_command("PSUBSCRIBE", *patterns)
-            exit_stack.push_async_callback(
-                conn.execute_command, "PUNSUBSCRIBE", *patterns
-            )
-            yield receive
+        args = (
+            self._pool,
+            patterns,
+            "psubscribe",
+            "pmessage",
+            decode,
+            "PSUBSCRIBE",
+            "PUNSUBSCRIBE",
+        )
+        return Subscription[str](*args) if decode else Subscription[bytes](*args)

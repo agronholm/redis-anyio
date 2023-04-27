@@ -114,7 +114,7 @@ class TestMiscellaneousOperations:
 
 
 class TestPublishSubscribe:
-    async def test_subscribe(self, redis_port: int) -> None:
+    async def test_subscribe(self, redis_port: int, decode: bool) -> None:
         async def publish_messages() -> None:
             await client.publish("channel1", "Hello")
             await client.publish("channel2", "World!")
@@ -122,19 +122,26 @@ class TestPublishSubscribe:
 
         async with RedisClient(port=redis_port) as client:
             async with client.subscribe(
-                "channel1", "channel2"
+                "channel1", "channel2", decode=decode
             ) as subscription, create_task_group() as tg:
                 tg.start_soon(publish_messages)
                 with fail_after(2):
                     messages = [await subscription.__anext__() for _ in range(3)]
 
-        assert messages == [
-            ("channel1", b"Hello"),
-            ("channel2", b"World!"),
-            ("channel1", b"\xc3\xa5\xc3\xa4\xc3\xb6"),
-        ]
+        if decode:
+            assert messages == [
+                ("channel1", "Hello"),
+                ("channel2", "World!"),
+                ("channel1", "åäö"),
+            ]
+        else:
+            assert messages == [
+                ("channel1", b"Hello"),
+                ("channel2", b"World!"),
+                ("channel1", b"\xc3\xa5\xc3\xa4\xc3\xb6"),
+            ]
 
-    async def test_ssubscribe(self) -> None:
+    async def test_ssubscribe(self, decode: bool) -> None:
         async def publish_messages() -> None:
             await client.spublish("channel1", "Hello")
             await client.spublish("channel2", "World!")
@@ -142,19 +149,26 @@ class TestPublishSubscribe:
 
         async with RedisClient(port=6380) as client:
             async with client.ssubscribe(
-                "channel1", "channel2"
+                "channel1", "channel2", decode=decode
             ) as subscription, create_task_group() as tg:
                 tg.start_soon(publish_messages)
                 with fail_after(2):
                     messages = [await subscription.__anext__() for _ in range(3)]
 
-        assert messages == [
-            ("channel1", b"Hello"),
-            ("channel2", b"World!"),
-            ("channel1", b"\xc3\xa5\xc3\xa4\xc3\xb6"),
-        ]
+        if decode:
+            assert messages == [
+                ("channel1", "Hello"),
+                ("channel2", "World!"),
+                ("channel1", "åäö"),
+            ]
+        else:
+            assert messages == [
+                ("channel1", b"Hello"),
+                ("channel2", b"World!"),
+                ("channel1", b"\xc3\xa5\xc3\xa4\xc3\xb6"),
+            ]
 
-    async def test_psubscribe(self, redis_port: int) -> None:
+    async def test_psubscribe(self, redis_port: int, decode: bool) -> None:
         async def publish_messages() -> None:
             await client.publish("channel1", "Hello")
             await client.publish("channel2", "World!")
@@ -163,14 +177,21 @@ class TestPublishSubscribe:
         messages = []
         async with RedisClient(port=redis_port) as client:
             async with client.psubscribe(
-                "channel?"
+                "channel?", decode=decode
             ) as subscription, create_task_group() as tg:
                 tg.start_soon(publish_messages)
                 with fail_after(2):
                     messages = [await subscription.__anext__() for _ in range(3)]
 
-        assert messages == [
-            ("channel1", b"Hello"),
-            ("channel2", b"World!"),
-            ("channel1", b"\xc3\xa5\xc3\xa4\xc3\xb6"),
-        ]
+        if decode:
+            assert messages == [
+                ("channel1", "Hello"),
+                ("channel2", "World!"),
+                ("channel1", "åäö"),
+            ]
+        else:
+            assert messages == [
+                ("channel1", b"Hello"),
+                ("channel2", b"World!"),
+                ("channel1", b"\xc3\xa5\xc3\xa4\xc3\xb6"),
+            ]

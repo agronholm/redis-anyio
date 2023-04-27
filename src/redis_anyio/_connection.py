@@ -3,12 +3,16 @@ from __future__ import annotations
 import random
 import sys
 from collections import defaultdict, deque
-from collections.abc import AsyncGenerator, Generator, Sequence
-from contextlib import asynccontextmanager, contextmanager
+from collections.abc import AsyncGenerator, Generator
+from contextlib import (
+    AsyncExitStack,
+    asynccontextmanager,
+    contextmanager,
+)
 from dataclasses import dataclass, field
 from ssl import SSLContext
 from types import TracebackType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, AnyStr, Generic
 
 from anyio import (
     BrokenResourceError,
@@ -32,9 +36,9 @@ from ._resp3 import (
     RESP3Parser,
     RESP3PushData,
     RESP3SimpleError,
+    decode_bytestrings,
     serialize_command,
 )
-from ._resp3._parser import decode_bytestrings
 
 if sys.version_info >= (3, 11):
     from typing import Self
@@ -56,44 +60,86 @@ PUBSUB_REPLIES = frozenset(
 )
 
 
+@dataclass(eq=False)
+class Subscription(Generic[AnyStr]):
+    pool: RedisConnectionPool
+    channels: tuple[str, ...]
+    subscribe_category: str
+    message_category: str
+    decode: bool
+    subscribe_command: str
+    unsubscribe_command: str
+    _exit_stack: AsyncExitStack = field(init=False, default_factory=AsyncExitStack)
+    _conn: RedisConnection = field(init=False)
+    _send_stream: MemoryObjectSendStream[tuple[str, AnyStr]] = field(init=False)
+    _receive_stream: MemoryObjectReceiveStream[tuple[str, AnyStr]] = field(init=False)
+
+    async def _subscribe(self) -> None:
+        self._conn = await self._exit_stack.enter_async_context(self.pool.acquire())
+        self._send_stream, self._receive_stream = create_memory_object_stream(5)
+        await self._exit_stack.enter_async_context(self._receive_stream)
+        self._exit_stack.enter_context(self._conn.add_subscription(self))
+        await self._conn.execute_command(self.subscribe_command, *self.channels)
+        self._exit_stack.push_async_callback(
+            self._conn.execute_command, self.unsubscribe_command, *self.channels
+        )
+
+    async def __aenter__(self) -> Self:
+        await self._exit_stack.__aenter__()
+        await self._subscribe()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
+
+    async def __aiter__(self) -> Self:
+        return self
+
+    async def __anext__(self) -> tuple[str, AnyStr]:
+        try:
+            return await self._receive_stream.receive()
+        except BaseException:
+            await self._exit_stack.__aexit__(*sys.exc_info())
+            raise
+
+    async def deliver(self, channel: str, message: AnyStr) -> None:
+        await self._send_stream.send((channel, message))
+
+
 @dataclass
 class RedisConnection:
     timeout: float | None
     _send_stream: AnyByteSendStream = field(init=False)
     _response_stream: MemoryObjectReceiveStream[RESP3Value] = field(init=False)
     _parser: RESP3Parser = field(init=False, default_factory=RESP3Parser)
-    # type -> channel/pattern key -> set of streams
-    _push_data_receivers: dict[
-        str, dict[bytes, set[MemoryObjectSendStream[RESP3Value]]]
-    ] = field(
+    # type -> channel/pattern key -> list of subscription objects
+    _subscriptions: dict[str, dict[bytes, list[Subscription[Any]]]] = field(
         init=False,
-        default_factory=lambda: defaultdict(lambda: defaultdict(set)),
+        default_factory=lambda: defaultdict(lambda: defaultdict(list)),
     )
 
     async def _handle_push_data(self, item: RESP3PushData) -> None:
-        if not (receivers := self._push_data_receivers.get(item.type)):
-            return
-
-        if item.type in ("message", "smessage"):
-            assert isinstance(item.data[0], bytes)
-            assert isinstance(item.data[1], bytes)
-            target_key = item.data[0]
-            channel = item.data[0].decode("utf-8", errors="replace")
-            value = channel, item.data[1]
-        elif item.type == "pmessage":
-            assert isinstance(item.data[0], bytes)
-            assert isinstance(item.data[1], bytes)
-            assert isinstance(item.data[2], bytes)
-            target_key = item.data[0]
-            channel = item.data[1].decode("utf-8", errors="replace")
-            value = channel, item.data[2]
-        else:
-            return
-
-        if streams := receivers.get(target_key):
+        assert isinstance(item.data[0], bytes)
+        subscriptions_by_channel = self._subscriptions.get(item.type) or {}
+        if subscriptions := subscriptions_by_channel.get(item.data[0]):
+            assert isinstance(item.data[-1], bytes)
+            assert isinstance(item.data[-2], bytes)
+            channel = item.data[-2].decode("utf-8", errors="backslashreplace")
             async with create_task_group() as tg:
-                for stream in streams:
-                    tg.start_soon(stream.send, value)
+                for subscription in subscriptions:
+                    if subscription.decode:
+                        message: str | bytes = item.data[-1].decode(
+                            "utf-8", errors="backslashreplace"
+                        )
+                    else:
+                        message = item.data[-1]
+
+                    tg.start_soon(subscription.deliver, channel, message)
 
     async def _handle_attribute(self, attribute: RESP3Attributes) -> None:
         pass  # Drop attributes on the floor for now
@@ -166,23 +212,25 @@ class RedisConnection:
         return responses
 
     @contextmanager
-    def add_push_data_receiver(
-        self,
-        stream: MemoryObjectSendStream[RESP3Value],
-        keys: Sequence[str],
-        type_: str,
+    def add_subscription(
+        self, subscription: Subscription[Any]
     ) -> Generator[None, None, None]:
-        receivers = self._push_data_receivers[type_]
-        for key in keys:
-            receivers[key.encode("utf-8")].add(stream)
+        for type_ in (subscription.subscribe_category, subscription.message_category):
+            subscriptions_by_channel = self._subscriptions[type_]
+            for key in subscription.channels:
+                subscriptions_by_channel[key.encode("utf-8")].append(subscription)
 
         yield
 
-        for key in keys:
-            receivers[key.encode("utf-8")].remove(stream)
+        for type_ in (subscription.subscribe_category, subscription.message_category):
+            subscriptions_by_channel = self._subscriptions[type_]
+            for key in subscription.channels:
+                subscriptions_by_channel[key.encode("utf-8")].remove(subscription)
 
-        if not receivers:
-            del self._push_data_receivers[type_]
+        for type_ in (subscription.subscribe_category, subscription.message_category):
+            subscriptions_by_channel = self._subscriptions[type_]
+            if not subscriptions_by_channel:
+                del self._subscriptions[type_]
 
 
 @dataclass(frozen=True)
