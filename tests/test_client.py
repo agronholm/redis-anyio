@@ -64,8 +64,78 @@ class TestBasicKeyOperations:
                 else [b"1", b"2"]
             )
 
+    async def test_pexpire(self, redis_port: int, decode: bool) -> None:
+        async with RedisClient(port=redis_port) as client:
+            await client.delete("foo")
+            await client.set("foo", "bar")
+            assert await client.pexpire("foo", 10000) == 1
+            assert 9000 < await client.pttl("foo") <= 10000
+
+    async def test_pexpireat(self, redis_port: int, decode: bool) -> None:
+        async with RedisClient(port=redis_port) as client:
+            await client.delete("foo")
+            await client.set("foo", "bar")
+            server_time, _ = await client.time()
+            expire_time = server_time * 1000 + 10000
+            assert await client.pexpireat("foo", expire_time) == 1
+            assert 9000 < await client.pttl("foo") <= 10000
+
+    @pytest.mark.parametrize(
+        "kwargs, expected_keys",
+        [
+            pytest.param({}, ["listkey1", "strkey1", "strkey2"], id="all"),
+            pytest.param({"type_": "string"}, ["strkey1", "strkey2"], id="strings"),
+            pytest.param({"type_": "list"}, ["listkey1"], id="lists"),
+            pytest.param({"match": "*key1"}, ["listkey1", "strkey1"], id="key1"),
+        ],
+    )
+    async def test_scan(
+        self, redis_port: int, kwargs: dict[str, str], expected_keys: list[str]
+    ) -> None:
+        async with RedisClient(port=redis_port) as client:
+            await client.flushdb()
+            await client.set("strkey1", "value")
+            await client.set("strkey2", "value")
+            await client.rpush("listkey1", "value")
+            async with client.scan(count=1, **kwargs) as iterator:
+                keys = [key async for key in iterator]
+
+            assert sorted(keys) == expected_keys
+
 
 class TestListOperations:
+    async def test_blmpop(self, redis7_port: int, decode: bool) -> None:
+        async with RedisClient(port=redis7_port) as client, create_task_group() as tg:
+            await client.delete("dummy")
+            tg.start_soon(client.rpush, "dummy", "value1", "value2", "value3")
+            result = await client.blmpop("left", "dummy", count=2, decode=decode)
+            if decode:
+                assert result == ("dummy", ["value1", "value2"])
+            else:
+                assert result == ("dummy", [b"value1", b"value2"])
+
+    async def test_lmpop(self, redis7_port: int, decode: bool) -> None:
+        async with RedisClient(port=redis7_port) as client:
+            await client.delete("dummy")
+            assert await client.lmpop("left", "dummy") is None
+            assert await client.rpush("dummy", "value1", "value2", "value3")
+            result = await client.lmpop("left", "dummy", count=2, decode=decode)
+            if decode:
+                assert result == ("dummy", ["value1", "value2"])
+            else:
+                assert result == ("dummy", [b"value1", b"value2"])
+
+    async def test_lpop(self, redis_port: int, decode: bool) -> None:
+        async with RedisClient(port=redis_port) as client:
+            await client.delete("dummy")
+            assert await client.lpop("dummy") is None
+            assert await client.rpush("dummy", "value1", "value2", "value3")
+            result = await client.lpop("dummy", count=2, decode=decode)
+            if decode:
+                assert result == ["value1", "value2"]
+            else:
+                assert result == [b"value1", b"value2"]
+
     async def test_rpush_llen(self, redis_port: int) -> None:
         async with RedisClient(port=redis_port) as client:
             await client.delete("dummy")
@@ -74,7 +144,7 @@ class TestListOperations:
 
 
 class TestHashMapOperations:
-    async def test_hset_hget_hmget_hdelete(self, redis_port: int, decode: bool) -> None:
+    async def test_hset_hget_hmget_hdel(self, redis_port: int, decode: bool) -> None:
         async with RedisClient(port=redis_port) as client:
             await client.delete("dummy")
             await client.hset("dummy", {"key1": 8, "key2": "foo"})
@@ -89,6 +159,17 @@ class TestHashMapOperations:
             )
             assert await client.hdel("dummy", "key1") == 1
             assert await client.hget("dummy", "key1") is None
+
+    async def test_hgetall(self, redis_port: int, decode: bool) -> None:
+        async with RedisClient(port=redis_port) as client:
+            await client.delete("dummy")
+            assert await client.hgetall("dummy") == {}
+            await client.hset("dummy", {"key1": 8, "key2": "foo"})
+            result = await client.hgetall("dummy", decode=decode)
+            if decode:
+                assert result == {"key1": "8", "key2": "foo"}
+            else:
+                assert result == {b"key1": b"8", b"key2": b"foo"}
 
 
 class TestMiscellaneousOperations:
@@ -141,13 +222,13 @@ class TestPublishSubscribe:
                 ("channel1", b"\xc3\xa5\xc3\xa4\xc3\xb6"),
             ]
 
-    async def test_ssubscribe(self, decode: bool) -> None:
+    async def test_ssubscribe(self, redis7_port: int, decode: bool) -> None:
         async def publish_messages() -> None:
             await client.spublish("channel1", "Hello")
             await client.spublish("channel2", "World!")
             await client.spublish("channel1", "åäö")
 
-        async with RedisClient(port=6380) as client:
+        async with RedisClient(port=redis7_port) as client:
             async with client.ssubscribe(
                 "channel1", "channel2", decode=decode
             ) as subscription, create_task_group() as tg:
@@ -174,7 +255,6 @@ class TestPublishSubscribe:
             await client.publish("channel2", "World!")
             await client.publish("channel1", "åäö")
 
-        messages = []
         async with RedisClient(port=redis_port) as client:
             async with client.psubscribe(
                 "channel?", decode=decode
@@ -195,3 +275,15 @@ class TestPublishSubscribe:
                 ("channel2", b"World!"),
                 ("channel1", b"\xc3\xa5\xc3\xa4\xc3\xb6"),
             ]
+
+
+class TestPipeline:
+    async def test_pipeline(self, redis_port: int) -> None:
+        async with RedisClient(port=redis_port) as client:
+            await client.delete("foo")
+            pipeline = client.pipeline()
+            pipeline.hset("foo", {"key": "value"})
+            pipeline.pexpire("foo", 1000)
+            pipeline.pttl("foo")
+            results = await pipeline.execute()
+            assert results == [1, 1, 1000]

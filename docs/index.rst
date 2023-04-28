@@ -2,7 +2,6 @@ Redis-AnyIO
 ===========
 
 .. include:: ../README.rst
-   :end-before: See the
 
 Quick links
 -----------
@@ -12,5 +11,6 @@ Quick links
 
    userguide
    features
+   contributing
    api
    versionhistory

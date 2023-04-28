@@ -12,3 +12,8 @@ from _pytest.fixtures import SubRequest
 )
 def redis_port(request: SubRequest) -> int:
     return cast(int, request.param)
+
+
+@pytest.fixture
+def redis7_port() -> int:
+    return 6380

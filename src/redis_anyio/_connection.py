@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 import sys
 from collections import defaultdict, deque
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Generator, Sequence
 from contextlib import (
     AsyncExitStack,
     asynccontextmanager,
@@ -29,7 +29,6 @@ from anyio.abc import AnyByteSendStream, AnyByteStream, TaskGroup, TaskStatus
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from tenacity import AsyncRetrying, retry_if_exception_type
 
-from ._pipeline import RedisPipeline
 from ._resp3 import (
     RESP3Attributes,
     RESP3BlobError,
@@ -195,17 +194,15 @@ class RedisConnection:
             return response
 
     async def execute_pipeline(
-        self, pipeline: RedisPipeline
+        self, commands: Sequence[bytes]
     ) -> list[RESP3Value | RESP3BlobError | RESP3SimpleError]:
         # Send the commands
-        payload = b"".join(
-            [serialize_command(command, *args) for command, args in pipeline]
-        )
+        payload = b"".join(commands)
         await self._send_stream.send(payload)
 
         # Read back the responses
         responses: list[RESP3Value | RESP3BlobError | RESP3SimpleError] = []
-        while len(responses) < len(pipeline):
+        while len(responses) < len(commands):
             with fail_after(self.timeout):
                 responses.append(await self._response_stream.receive())
 
@@ -376,13 +373,13 @@ class RedisConnectionPool:
         raise AssertionError("Execution should never get to this point")
 
     async def execute_pipeline(
-        self, pipeline: RedisPipeline
+        self, commands: Sequence[bytes]
     ) -> list[RESP3Value | RESP3BlobError | RESP3SimpleError]:
         async for attempt in AsyncRetrying(
             sleep=sleep, retry=retry_if_exception_type(BrokenResourceError)
         ):
             with attempt:
                 async with self.acquire() as conn:
-                    return await conn.execute_pipeline(pipeline)
+                    return await conn.execute_pipeline(commands)
 
         raise AssertionError("Execution should never get to this point")
