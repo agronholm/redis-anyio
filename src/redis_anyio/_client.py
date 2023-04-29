@@ -4,7 +4,7 @@ import random
 import sys
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from itertools import chain
 from types import TracebackType
 from typing import TYPE_CHECKING, Literal, cast, overload
@@ -14,6 +14,7 @@ from ._connection import (
     RedisConnectionPoolStatistics,
     Subscription,
 )
+from ._lock import RedisLock
 from ._pipeline import RedisPipeline
 from ._utils import as_string
 
@@ -64,6 +65,68 @@ class RedisClient:
         """
         return await self._pool.execute_command(command.upper(), *args, decode=decode)
 
+    def lock(
+        self,
+        name: str,
+        lifetime: int | timedelta,
+        *,
+        extend_interval: int | timedelta | None = None,
+        retry_interval: int | timedelta = 1000,
+    ) -> RedisLock:
+        """
+        Create a lock object bound to this client.
+
+        :param name: unique name of the lock
+        :param lifetime: the expiration time of the lock (in milliseconds or as
+            a timedelta)
+        :param extend_interval: Wait this long until extending the expiration time of
+            the lock (in milliseconds or as a timedelta). If omitted, extending happens
+            5 seconds before the expiration is due, or lifetime / 2 if the life time is
+            under 10 seconds.
+        :param retry_interval: if the lock was already acquired by another client,
+            wait this long until trying to reacquire it (in milliseconds or as a
+            timedelta)
+
+        Usage::
+
+            async with client.lock("lockname", 30000):
+                ...
+
+        Alternatively, you can share the lock object among multiple tasks::
+
+            from anyio import create_task_group
+
+            async def task_function(lock):
+                async with lock:
+                    ...
+
+            lock = client.lock("lockname", 30000)
+            async with create_task_group() as tg:
+                for _ in range(5):
+                    tg.start_soon(task_function, lock)
+
+        """
+        if isinstance(lifetime, timedelta):
+            lifetime_ms = int(lifetime.total_seconds() * 1000)
+        else:
+            lifetime_ms = lifetime
+
+        if isinstance(retry_interval, timedelta):
+            retry_interval_ms = int(retry_interval.total_seconds() * 1000)
+        else:
+            retry_interval_ms = retry_interval
+
+        if isinstance(extend_interval, timedelta):
+            extend_interval_ms = int(extend_interval.total_seconds() * 1000)
+        elif extend_interval is not None:
+            extend_interval_ms = extend_interval
+        elif lifetime_ms >= 10000:
+            extend_interval_ms = lifetime_ms - 5000
+        else:
+            extend_interval_ms = int(lifetime_ms / 2)
+
+        return RedisLock(name, lifetime_ms, extend_interval_ms, retry_interval_ms, self)
+
     def pipeline(self) -> RedisPipeline:
         """Create a new command pipeline bound to this client."""
         return RedisPipeline(self._pool)
@@ -111,7 +174,7 @@ class RedisClient:
     async def set(
         self,
         key: str,
-        value: str,
+        value: str | bytes,
         *,
         nx: bool = False,
         xx: bool = False,
@@ -129,7 +192,7 @@ class RedisClient:
     async def set(
         self,
         key: str,
-        value: str,
+        value: str | bytes,
         *,
         nx: bool = False,
         xx: bool = False,
@@ -146,7 +209,7 @@ class RedisClient:
     async def set(
         self,
         key: str,
-        value: str,
+        value: str | bytes,
         *,
         nx: bool = False,
         xx: bool = False,
@@ -1195,6 +1258,77 @@ class RedisClient:
                 f"PING command returned an unexpected payload (got {retval!r}, "
                 f"expected {nonce!r}"
             )
+
+    #
+    # Script operations
+    #
+
+    async def eval(
+        self, script: str, keys: list[str], args: list[object]
+    ) -> RESP3Value:
+        """
+        Run the given Lua script and return its result.
+
+        :param script: the source code of the script
+        :param keys: the list of keys used in the script
+        :param args: the list of arguments passed to the script
+        :return: the return value of the script
+
+        .. seealso::
+            `Official manual page for EVAL <https://redis.io/commands/eval/>`_
+
+        """
+        return await self.execute_command("EVAL", script, len(keys), *keys, *args)
+
+    async def evalsha(
+        self, sha1: str, keys: list[str], args: list[object]
+    ) -> RESP3Value:
+        """
+        Run a previously stored Lua script and return its result.
+
+        :param sha1: hex digest of a SHA-1 hash made from the script
+        :param keys: the list of keys used in the script
+        :param args: the list of arguments passed to the script
+        :return: the return value of the script
+
+        .. seealso::
+            `Official manual page for EVALSHA <https://redis.io/commands/evalsha/>`_
+
+        """
+        return await self.execute_command("EVALSHA", sha1, len(keys), *keys, *args)
+
+    async def script_load(self, script: str) -> str:
+        """
+        Load the given Lua script into the scripts cache (without executing it).
+
+        :param script: the source code of the script
+        :return: the SHA-1 hex digest of the script
+
+        .. seealso::
+            `Official manual page for 'SCRIPT LOAD'
+            <https://redis.io/commands/script-load/>`_
+
+        """
+        retval = await self.execute_command("SCRIPT", "LOAD", script)
+        assert isinstance(retval, str)
+        return retval
+
+    async def script_flush(self, sync: bool = True) -> None:
+        """
+        Flush the Lua script cache.
+
+        :param sync: if ``True``, flush the scripts synchronously;
+            if ``False``, flush them asynchronously.
+
+        :return: the SHA-1 hex digest of the script
+
+        .. seealso::
+            `Official manual page for 'SCRIPT LOAD'
+            <https://redis.io/commands/script-load/>`_
+
+        """
+        mode = "SYNC" if sync else "ASYNC"
+        await self.execute_command("SCRIPT", "FLUSH", mode)
 
     #
     # Publish/Subscribe operations

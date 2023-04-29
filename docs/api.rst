@@ -8,11 +8,6 @@ Client
 
 .. autoclass:: RedisClient
 
-.. autoclass:: RedisPipeline
-
-.. autoclass:: RedisConnectionPoolStatistics
-
-
 Types
 =====
 
@@ -23,6 +18,12 @@ Types
 .. autoclass:: RESP3BlobError
 
 .. autoclass:: Subscription
+
+.. autoclass:: RedisPipeline
+
+.. autoclass:: RedisConnectionPoolStatistics
+
+.. autoclass:: RedisLock
 
 Exceptions
 ==========

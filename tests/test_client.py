@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import cast
 
 import pytest
 from _pytest.fixtures import SubRequest
-from anyio import create_task_group, fail_after
+from anyio import create_task_group, fail_after, sleep
+from anyio.abc import TaskStatus
 
 from redis_anyio import RedisClient
 
@@ -287,3 +289,79 @@ class TestPipeline:
             pipeline.pttl("foo")
             results = await pipeline.execute()
             assert results == [1, 1, 1000]
+
+
+class TestLock:
+    @pytest.mark.parametrize(
+        "lifetime",
+        [
+            pytest.param(20000, id="integer"),
+            pytest.param(timedelta(seconds=20), id="timedelta"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "separate_locks",
+        [pytest.param(False, id="same"), pytest.param(True, id="separate")],
+    )
+    async def test_locking(
+        self, redis_port: int, lifetime: int | timedelta, separate_locks: bool
+    ) -> None:
+        events: list[str] = []
+
+        async def acquire_lock(*, task_status: TaskStatus) -> None:
+            async with lock1:
+                task_status.started()
+                events.append("subtask acquired the lock")
+                await sleep(0.1)
+                events.append("subtask sleep done, releasing the lock")
+
+            events.append("subtask released the lock")
+
+        async with RedisClient(port=redis_port) as client, create_task_group() as tg:
+            lock1 = client.lock("dummylock", lifetime)
+            lock2 = client.lock("dummylock", lifetime) if separate_locks else lock1
+
+            await client.delete(lock2.name)
+            await client.script_flush()
+            await tg.start(acquire_lock)
+            async with lock2:
+                events.append("main task acquired the lock")
+
+            events.append("main task released the lock")
+
+        assert events == [
+            "subtask acquired the lock",
+            "subtask sleep done, releasing the lock",
+            "subtask released the lock",
+            "main task acquired the lock",
+            "main task released the lock",
+        ]
+
+    @pytest.mark.parametrize(
+        "separate_locks",
+        [pytest.param(False, id="same"), pytest.param(True, id="separate")],
+    )
+    async def test_task_holding_lock_cancelled(
+        self, redis_port: int, separate_locks: bool
+    ) -> None:
+        """
+        Test that when a task that holds a lock gets cancelled, it won't stop the next
+        one from getting the lock.
+        """
+
+        async def acquire_lock(*, task_status: TaskStatus) -> None:
+            async with lock:
+                task_status.started()
+                await sleep(5)
+
+            pytest.fail("Execution should never reach this point")
+
+        async with RedisClient(port=redis_port) as client:
+            lock = client.lock("dummylock", 20000)
+            async with create_task_group() as tg:
+                await tg.start(acquire_lock)
+                tg.cancel_scope.cancel()
+
+            with fail_after(1):
+                async with lock:
+                    pass
