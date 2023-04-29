@@ -293,19 +293,10 @@ class TestPipeline:
 
 class TestLock:
     @pytest.mark.parametrize(
-        "lifetime",
-        [
-            pytest.param(20000, id="integer"),
-            pytest.param(timedelta(seconds=20), id="timedelta"),
-        ],
-    )
-    @pytest.mark.parametrize(
         "separate_locks",
         [pytest.param(False, id="same"), pytest.param(True, id="separate")],
     )
-    async def test_locking(
-        self, redis_port: int, lifetime: int | timedelta, separate_locks: bool
-    ) -> None:
+    async def test_locking(self, redis_port: int, separate_locks: bool) -> None:
         events: list[str] = []
 
         async def acquire_lock(*, task_status: TaskStatus) -> None:
@@ -318,8 +309,8 @@ class TestLock:
             events.append("subtask released the lock")
 
         async with RedisClient(port=redis_port) as client, create_task_group() as tg:
-            lock1 = client.lock("dummylock", lifetime)
-            lock2 = client.lock("dummylock", lifetime) if separate_locks else lock1
+            lock1 = client.lock("dummylock")
+            lock2 = client.lock("dummylock") if separate_locks else lock1
 
             await client.delete(lock2.name)
             await client.script_flush()
@@ -336,6 +327,11 @@ class TestLock:
             "main task acquired the lock",
             "main task released the lock",
         ]
+
+    async def test_lifetime_as_timedelta(self, redis7_port: int) -> None:
+        async with RedisClient(port=redis7_port) as client:
+            lock = client.lock("dummy", timedelta(seconds=15))
+            assert lock.lifetime == 15000
 
     @pytest.mark.parametrize(
         "separate_locks",
