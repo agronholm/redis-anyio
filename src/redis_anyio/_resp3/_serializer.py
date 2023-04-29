@@ -92,4 +92,7 @@ def serialize_command(command: str, *args: object) -> bytes:
     :return: the bytes to be sent to the Redis server
 
     """
-    return serialize_array([command] + [str(arg) for arg in args])
+    return serialize_array(
+        [command.encode("utf-8")]
+        + [arg if isinstance(arg, bytes) else str(arg).encode("utf-8") for arg in args]
+    )
