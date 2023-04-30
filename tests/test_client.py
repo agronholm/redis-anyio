@@ -330,7 +330,7 @@ class TestLock:
 
     async def test_lifetime_as_timedelta(self, redis7_port: int) -> None:
         async with RedisClient(port=redis7_port) as client:
-            lock = client.lock("dummy", timedelta(seconds=15))
+            lock = client.lock("dummy", lifetime=timedelta(seconds=15))
             assert lock.lifetime == 15000
 
     @pytest.mark.parametrize(
@@ -353,7 +353,7 @@ class TestLock:
             pytest.fail("Execution should never reach this point")
 
         async with RedisClient(port=redis_port) as client:
-            lock = client.lock("dummylock", 20000)
+            lock = client.lock("dummylock")
             async with create_task_group() as tg:
                 await tg.start(acquire_lock)
                 tg.cancel_scope.cancel()

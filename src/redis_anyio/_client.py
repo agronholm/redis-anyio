@@ -68,8 +68,8 @@ class RedisClient:
     def lock(
         self,
         name: str,
-        lifetime: int | timedelta = 30000,
         *,
+        lifetime: int | timedelta = 30000,
         extend_interval: int | timedelta | None = None,
         retry_interval: int | timedelta = 1000,
     ) -> RedisLock:
