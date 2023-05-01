@@ -23,7 +23,7 @@ jobs:
     - name: Start external services
       run: docker compose up -d
     - name: Install dependencies
-      run: pip install -e .[test] coveralls coverage[toml]
+      run: pip install -e .[test] coverage[toml]
     - name: Test with pytest
       run: coverage run -m pytest
     - name: Upload Coverage
