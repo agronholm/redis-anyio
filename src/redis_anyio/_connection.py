@@ -23,6 +23,7 @@ from anyio import (
     create_memory_object_stream,
     create_task_group,
     fail_after,
+    get_cancelled_exc_class,
     sleep,
 )
 from anyio.abc import AnyByteSendStream, AnyByteStream, TaskGroup, TaskStatus
@@ -142,6 +143,12 @@ class RedisConnection:
 
     async def _handle_attribute(self, attribute: RESP3Attributes) -> None:
         pass  # Drop attributes on the floor for now
+
+    async def aclose(self, *, force: bool = True) -> None:
+        if force:
+            await aclose_forcefully(self._send_stream)
+        else:
+            await self._send_stream.aclose()
 
     async def run(self, stream: AnyByteStream, *, task_status: TaskStatus) -> None:
         send, self._response_stream = create_memory_object_stream(100)
@@ -320,7 +327,12 @@ class RedisConnectionPool:
 
             try:
                 yield conn
-            finally:
+            except BaseException:
+                # Throw away the connection when there's any trouble
+                await conn.aclose(force=True)
+                raise
+            else:
+                # Otherwise, put it back in the pool
                 self._idle_connections.append(conn)
 
     async def _add_connection(self) -> RedisConnection:
@@ -368,7 +380,10 @@ class RedisConnectionPool:
         ):
             with attempt:
                 async with self.acquire() as conn:
-                    return await conn.execute_command(command, *args, decode=decode)
+                    try:
+                        return await conn.execute_command(command, *args, decode=decode)
+                    except get_cancelled_exc_class():
+                        raise
 
         raise AssertionError("Execution should never get to this point")
 

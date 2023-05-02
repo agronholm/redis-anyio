@@ -361,3 +361,21 @@ class TestLock:
             with fail_after(1):
                 async with lock:
                     pass
+
+
+async def test_cancel_operation(redis7_port: int) -> None:
+    """
+    Test that cancelling a task in the middle of a blocking operation will caused the
+    connection to be dropped from the pool.
+    """
+    async with RedisClient(port=redis7_port) as client:
+        async with create_task_group() as tg:
+            tg.start_soon(client.blpop, "dummy")
+            await sleep(0.1)
+            assert client.statistics().busy_connections == 1
+            assert client.statistics().idle_connections == 0
+
+            tg.cancel_scope.cancel()
+
+        assert client.statistics().busy_connections == 0
+        assert client.statistics().idle_connections == 0
