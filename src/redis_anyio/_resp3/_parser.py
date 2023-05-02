@@ -406,7 +406,6 @@ class RESP3Parser:
                     return parsed
 
     def feed_bytes(self, data: bytes) -> None:
-        print("received:", data)
         self._buffer += data
 
 

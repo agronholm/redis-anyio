@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import random
 import sys
 from collections import defaultdict, deque
@@ -58,6 +59,8 @@ PUBSUB_REPLIES = frozenset(
         "punsubscribe",
     ]
 )
+
+logger = logging.getLogger("redis_anyio")
 
 
 @dataclass(eq=False)
@@ -157,6 +160,7 @@ class RedisConnection:
             task_status.started()
             try:
                 async for data in stream:
+                    logger.debug("Received data from server: %r", data)
                     self._parser.feed_bytes(data)
                     for item in self._parser:
                         if (
@@ -185,7 +189,7 @@ class RedisConnection:
         # Send the command
         payload = serialize_command(command, *args)
         # with fail_after(self.timeout):
-        print("sent:", payload)
+        logger.debug("Sent data to server: %r", payload)
         await self._send_stream.send(payload)
 
         # Read back the response
