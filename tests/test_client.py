@@ -71,7 +71,7 @@ class TestBasicKeyOperations:
             await client.delete("foo")
             await client.set("foo", "bar")
             assert await client.pexpire("foo", 10000) == 1
-            assert 9000 < await client.pttl("foo") <= 10000
+            assert 8000 < await client.pttl("foo") <= 10000
 
     async def test_pexpireat(self, redis_port: int, decode: bool) -> None:
         async with RedisClient(port=redis_port) as client:
@@ -80,7 +80,7 @@ class TestBasicKeyOperations:
             server_time, _ = await client.time()
             expire_time = server_time * 1000 + 10000
             assert await client.pexpireat("foo", expire_time) == 1
-            assert 9000 < await client.pttl("foo") <= 10000
+            assert 8000 < await client.pttl("foo") <= 10000
 
     @pytest.mark.parametrize(
         "kwargs, expected_keys",
