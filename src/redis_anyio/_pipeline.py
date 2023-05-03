@@ -14,16 +14,16 @@ if TYPE_CHECKING:
     from ._client import RedisClient
 
 
-@dataclass
+@dataclass(frozen=True)
 class RedisPipeline:
     client: RedisClient
-    _queued_commands: list[bytes] = field(init=False, default_factory=list)
+    queued_commands: list[bytes] = field(init=False, default_factory=list)
 
     async def execute(self) -> Sequence[ResponseValue | ResponseError]:
-        return await self.client.execute_pipeline(self._queued_commands)
+        return await self.client.execute_pipeline(self)
 
     def _queue_command(self, command: str, *args: object) -> None:
-        self._queued_commands.append(serialize_command(command, *args))
+        self.queued_commands.append(serialize_command(command, *args))
 
     def hset(self, key: str, values: Mapping[str | bytes, object]) -> None:
         self._queue_command("HSET", key, *chain.from_iterable(values.items()))

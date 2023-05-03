@@ -82,15 +82,25 @@ class RedisClient:
         raise AssertionError("Execution should never get to this point")
 
     async def execute_pipeline(
-        self, commands: Sequence[bytes]
+        self, pipeline: RedisPipeline
     ) -> Sequence[ResponseValue | ResponseError]:
+        """
+        Execute the given command pipeline on the server.
+
+        :param pipeline: the pipeline to execute
+        :return a sequence of command return values, or response errors for when a
+            command failed
+        :raises ConnectivityError: if there's a connectivity problem (can't connect to
+            the server, connection prematurely closed, etc.)
+
+        """
         async for attempt in AsyncRetrying(
             sleep=sleep,
             retry=retry_if_exception_type(ConnectivityError),
         ):
             with attempt:
                 async with self._pool.acquire() as conn:
-                    return await conn.execute_pipeline(commands)
+                    return await conn.execute_pipeline(pipeline)
 
         raise AssertionError("Execution should never get to this point")
 

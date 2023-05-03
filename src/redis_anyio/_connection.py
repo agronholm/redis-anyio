@@ -28,6 +28,7 @@ from anyio.abc import AnyByteSendStream, AnyByteStream, TaskGroup, TaskStatus
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
 from ._exceptions import ResponseError
+from ._pipeline import RedisPipeline
 from ._resp3 import (
     RESP3Attributes,
     RESP3BlobError,
@@ -218,7 +219,7 @@ class RedisConnection:
             return response
 
     async def execute_pipeline(
-        self, commands: Sequence[bytes]
+        self, pipeline: RedisPipeline
     ) -> Sequence[ResponseValue | ResponseError]:
         """
         Send a pipeline of commands to the server and wait for all the replies.
@@ -228,12 +229,12 @@ class RedisConnection:
 
         """
         # Send the commands
-        payload = b"".join(commands)
+        payload = b"".join(pipeline.queued_commands)
         await self._send_stream.send(payload)
 
         # Read back the responses
         responses: list[ResponseValue | ResponseError] = []
-        while len(responses) < len(commands):
+        while len(responses) < len(pipeline.queued_commands):
             with fail_after(self.timeout):
                 responses.append(await self._response_stream.receive())
 
