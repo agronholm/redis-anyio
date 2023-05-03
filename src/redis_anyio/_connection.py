@@ -16,7 +16,6 @@ from types import TracebackType
 from typing import Any, AnyStr, Generic
 
 from anyio import (
-    BrokenResourceError,
     ClosedResourceError,
     Semaphore,
     aclose_forcefully,
@@ -24,11 +23,9 @@ from anyio import (
     create_memory_object_stream,
     create_task_group,
     fail_after,
-    sleep,
 )
 from anyio.abc import AnyByteSendStream, AnyByteStream, TaskGroup, TaskStatus
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
-from tenacity import AsyncRetrying, retry_if_exception_type
 
 from ._exceptions import ResponseError
 from ._resp3 import (
@@ -398,29 +395,3 @@ class RedisConnectionPool:
             raise
 
         return conn
-
-    async def execute_command(
-        self, command: str, *args: object, decode: bool = True
-    ) -> ResponseValue:
-        async for attempt in AsyncRetrying(
-            sleep=sleep,
-            retry=retry_if_exception_type((BrokenResourceError, TimeoutError)),
-        ):
-            with attempt:
-                async with self.acquire() as conn:
-                    return await conn.execute_command(command, *args, decode=decode)
-
-        raise AssertionError("Execution should never get to this point")
-
-    async def execute_pipeline(
-        self, commands: Sequence[bytes]
-    ) -> Sequence[ResponseValue | ResponseError]:
-        async for attempt in AsyncRetrying(
-            sleep=sleep,
-            retry=retry_if_exception_type((BrokenResourceError, TimeoutError)),
-        ):
-            with attempt:
-                async with self.acquire() as conn:
-                    return await conn.execute_pipeline(commands)
-
-        raise AssertionError("Execution should never get to this point")

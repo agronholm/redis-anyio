@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import random
 import sys
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from itertools import chain
 from types import TracebackType
 from typing import TYPE_CHECKING, Literal, cast, overload
 
+from anyio import sleep
+from tenacity import AsyncRetrying, retry_if_exception_type
+
 from ._connection import (
     RedisConnectionPool,
     RedisConnectionPoolStatistics,
     Subscription,
 )
+from ._exceptions import ConnectivityError, ResponseError
 from ._lock import RedisLock
 from ._pipeline import RedisPipeline
 from ._types import ResponseValue
@@ -67,7 +71,28 @@ class RedisClient:
         :raises ResponseError: if the server returns an error response
 
         """
-        return await self._pool.execute_command(command.upper(), *args, decode=decode)
+        async for attempt in AsyncRetrying(
+            sleep=sleep,
+            retry=retry_if_exception_type(ConnectivityError),
+        ):
+            with attempt:
+                async with self._pool.acquire() as conn:
+                    return await conn.execute_command(command, *args, decode=decode)
+
+        raise AssertionError("Execution should never get to this point")
+
+    async def execute_pipeline(
+        self, commands: Sequence[bytes]
+    ) -> Sequence[ResponseValue | ResponseError]:
+        async for attempt in AsyncRetrying(
+            sleep=sleep,
+            retry=retry_if_exception_type(ConnectivityError),
+        ):
+            with attempt:
+                async with self._pool.acquire() as conn:
+                    return await conn.execute_pipeline(commands)
+
+        raise AssertionError("Execution should never get to this point")
 
     def lock(
         self,
@@ -133,7 +158,7 @@ class RedisClient:
 
     def pipeline(self) -> RedisPipeline:
         """Create a new command pipeline bound to this client."""
-        return RedisPipeline(self._pool)
+        return RedisPipeline(self)
 
     #
     # Basic key operations
@@ -148,7 +173,7 @@ class RedisClient:
         .. seealso:: `Official manual page <https://redis.io/commands/del/>`_
 
         """
-        return cast(int, await self._pool.execute_command("DEL", key, *keys))
+        return cast(int, await self.execute_command("DEL", key, *keys))
 
     @overload
     async def get(self, key: str, *, decode: Literal[False]) -> bytes | None:
@@ -170,7 +195,7 @@ class RedisClient:
         .. seealso:: `Official manual page for GET <https://redis.io/commands/get/>`_
 
         """
-        retval = await self._pool.execute_command("GET", key, decode=decode)
+        retval = await self.execute_command("GET", key, decode=decode)
         assert isinstance(retval, (str, bytes)) or retval is None
         return retval
 
@@ -272,7 +297,7 @@ class RedisClient:
         if keepttl:
             extra_args.append("KEEPTTL")
 
-        retval = await self._pool.execute_command(
+        retval = await self.execute_command(
             "SET", key, value, *extra_args, decode=decode
         )
         assert isinstance(retval, (str, bytes)) or retval is None
@@ -299,7 +324,7 @@ class RedisClient:
         .. seealso:: `Official manual page for MGET <https://redis.io/commands/mget/>`_
 
         """
-        retval = await self._pool.execute_command("MGET", *keys, decode=decode)
+        retval = await self.execute_command("MGET", *keys, decode=decode)
         assert isinstance(retval, list)
         return cast("list[str] | list[bytes]", retval)
 
@@ -312,7 +337,7 @@ class RedisClient:
         .. seealso:: `Official manual page for MSET <https://redis.io/commands/mset/>`_
 
         """
-        await self._pool.execute_command("MSET", *chain.from_iterable(values.items()))
+        await self.execute_command("MSET", *chain.from_iterable(values.items()))
 
     async def pexpire(
         self,
@@ -335,7 +360,7 @@ class RedisClient:
         if how is not None:
             args.append(how.upper())
 
-        retval = await self._pool.execute_command("PEXPIRE", key, milliseconds, *args)
+        retval = await self.execute_command("PEXPIRE", key, milliseconds, *args)
         assert isinstance(retval, int)
         return retval
 
@@ -365,7 +390,7 @@ class RedisClient:
         if how is not None:
             args.append(how.upper())
 
-        retval = await self._pool.execute_command("PEXPIREAT", key, *args)
+        retval = await self.execute_command("PEXPIREAT", key, *args)
         assert isinstance(retval, int)
         return retval
 
@@ -383,7 +408,7 @@ class RedisClient:
             <https://redis.io/commands/pexpiretime/>`_
 
         """
-        retval = await self._pool.execute_command("PEXPIRETIME", key)
+        retval = await self.execute_command("PEXPIRETIME", key)
         assert isinstance(retval, int)
         return retval
 
@@ -397,7 +422,7 @@ class RedisClient:
         .. seealso:: `Official manual page for PTTL <https://redis.io/commands/pttl/>`_
 
         """
-        retval = await self._pool.execute_command("PTTL", key)
+        retval = await self.execute_command("PTTL", key)
         assert isinstance(retval, int)
         return retval
 
@@ -462,7 +487,7 @@ class RedisClient:
         .. seealso:: `Official manual page for TIME <https://redis.io/commands/time/>`_
 
         """
-        retval = await self._pool.execute_command("TIME")
+        retval = await self.execute_command("TIME")
         assert isinstance(retval, list) and len(retval) == 2
         return int(cast(bytes, retval[0])), int(cast(bytes, retval[1]))
 
@@ -540,7 +565,7 @@ class RedisClient:
             `Official manual page for BLMOVE <https://redis.io/commands/blmove/>`_
 
         """
-        retval = await self._pool.execute_command(
+        retval = await self.execute_command(
             "BLMOVE", source, destination, wherefrom, whereto, timeout, decode=decode
         )
         assert isinstance(retval, (str, bytes))
@@ -611,7 +636,7 @@ class RedisClient:
         if count is not None:
             args.extend(["COUNT", count])
 
-        retval = await self._pool.execute_command(
+        retval = await self.execute_command(
             "BLMPOP", timeout, len(keys), *keys, wherefrom.upper(), *args, decode=decode
         )
         assert isinstance(retval, list)
@@ -657,9 +682,7 @@ class RedisClient:
             `Official manual page for BLPOP <https://redis.io/commands/blpop/>`_
 
         """
-        retval = await self._pool.execute_command(
-            "BLPOP", *keys, timeout, decode=decode
-        )
+        retval = await self.execute_command("BLPOP", *keys, timeout, decode=decode)
         assert isinstance(retval, list) and len(retval) == 2
         if retval[0] is None:
             return None, None
@@ -706,9 +729,7 @@ class RedisClient:
             `Official manual page for BRPOP <https://redis.io/commands/brpop/>`_
 
         """
-        retval = await self._pool.execute_command(
-            "BRPOP", *keys, timeout, decode=decode
-        )
+        retval = await self.execute_command("BRPOP", *keys, timeout, decode=decode)
         assert isinstance(retval, list) and len(retval) == 2
         if retval[0] is None:
             return None, None
@@ -777,7 +798,7 @@ class RedisClient:
             `Official manual page for LMOVE <https://redis.io/commands/lmove/>`_
 
         """
-        retval = await self._pool.execute_command(
+        retval = await self.execute_command(
             "LMOVE", source, destination, wherefrom, whereto, decode=decode
         )
         assert isinstance(retval, (str, bytes)) or retval is None
@@ -809,7 +830,7 @@ class RedisClient:
             `Official manual page for LINDEX <https://redis.io/commands/lindex/>`_
 
         """
-        retval = await self._pool.execute_command("LINDEX", key, index, decode=decode)
+        retval = await self.execute_command("LINDEX", key, index, decode=decode)
         assert isinstance(retval, (str, bytes))
         return retval
 
@@ -835,7 +856,7 @@ class RedisClient:
             `Official manual page for LINSERT <https://redis.io/commands/linsert/>`_
 
         """
-        retval = await self._pool.execute_command(
+        retval = await self.execute_command(
             "LINSERT", key, where.upper(), pivot, element
         )
         assert isinstance(retval, int)
@@ -851,7 +872,7 @@ class RedisClient:
         .. seealso:: `Official manual page for LLEN <https://redis.io/commands/llen/>`_
 
         """
-        retval = await self._pool.execute_command("LLEN", key)
+        retval = await self.execute_command("LLEN", key)
         assert isinstance(retval, int)
         return retval
 
@@ -912,7 +933,7 @@ class RedisClient:
         if count is not None:
             args.extend(["COUNT", count])
 
-        retval = await self._pool.execute_command(
+        retval = await self.execute_command(
             "LMPOP", len(keys), *keys, wherefrom.upper(), *args, decode=decode
         )
         if retval is None:
@@ -956,7 +977,7 @@ class RedisClient:
         .. seealso:: `Official manual page for LPOP <https://redis.io/commands/lpop/>`_
 
         """
-        retval = await self._pool.execute_command("LPOP", key, count, decode=decode)
+        retval = await self.execute_command("LPOP", key, count, decode=decode)
         if retval is None:
             return None
 
@@ -990,7 +1011,7 @@ class RedisClient:
         .. seealso:: `Official manual page for RPOP <https://redis.io/commands/rpop/>`_
 
         """
-        retval = await self._pool.execute_command("RPOP", key, count, decode=decode)
+        retval = await self.execute_command("RPOP", key, count, decode=decode)
         assert isinstance(retval, list)
         return cast("list[str] | list[bytes]", retval)
 
@@ -1006,7 +1027,7 @@ class RedisClient:
             `Official manual page for RPUSH <https://redis.io/commands/rpush/>`_
 
         """
-        retval = await self._pool.execute_command("RPUSH", key, *values)
+        retval = await self.execute_command("RPUSH", key, *values)
         assert isinstance(retval, int)
         return retval
 
@@ -1025,7 +1046,7 @@ class RedisClient:
             `Official manual page for RPUSHX <https://redis.io/commands/rpush/>`_
 
         """
-        retval = await self._pool.execute_command("RPUSHX", key, *values)
+        retval = await self.execute_command("RPUSHX", key, *values)
         assert isinstance(retval, int)
         return retval
 
@@ -1052,9 +1073,7 @@ class RedisClient:
         """
         return cast(
             str,
-            await self._pool.execute_command(
-                "GETRANGE", key, start, end, decode=decode
-            ),
+            await self.execute_command("GETRANGE", key, start, end, decode=decode),
         )
 
     async def setrange(
@@ -1077,7 +1096,7 @@ class RedisClient:
             `Official manual page for SETRANGE <https://redis.io/commands/setrange/>`_
 
         """
-        retval = await self._pool.execute_command(
+        retval = await self.execute_command(
             "SETRANGE", key, offset, value, decode=decode
         )
         assert isinstance(retval, int)
@@ -1100,7 +1119,7 @@ class RedisClient:
             `Official manual page for HDEL <https://redis.io/commands/hdel/>`_
 
         """
-        retval = await self._pool.execute_command("HDEL", key, field)
+        retval = await self.execute_command("HDEL", key, field)
         assert isinstance(retval, int)
         return retval
 
@@ -1130,7 +1149,7 @@ class RedisClient:
         .. seealso:: `Official manual page for HGET <https://redis.io/commands/hget/>`_
 
         """
-        retval = await self._pool.execute_command("HGET", key, field, decode=decode)
+        retval = await self.execute_command("HGET", key, field, decode=decode)
         assert isinstance(retval, (str, bytes)) or retval is None
         return retval
 
@@ -1164,7 +1183,7 @@ class RedisClient:
             `Official manual page for HGETALL <https://redis.io/commands/hgetall/>`_
 
         """
-        retval = await self._pool.execute_command("HGETALL", key, decode=decode)
+        retval = await self.execute_command("HGETALL", key, decode=decode)
         assert isinstance(retval, dict)
         return cast("dict[str, str] | dict[bytes, bytes]", retval)
 
@@ -1197,7 +1216,7 @@ class RedisClient:
             `Official manual page for HMGET <https://redis.io/commands/hmget/>`_
 
         """
-        retval = await self._pool.execute_command("HMGET", key, *fields, decode=decode)
+        retval = await self.execute_command("HMGET", key, *fields, decode=decode)
         assert isinstance(retval, list)
         return cast("list[str | None] | list[bytes | None]", retval)
 
@@ -1216,7 +1235,7 @@ class RedisClient:
         .. seealso:: `Official manual page for HSET <https://redis.io/commands/hset/>`_
 
         """
-        retval = await self._pool.execute_command(
+        retval = await self.execute_command(
             "HSET", key, *chain.from_iterable(values.items())
         )
         assert isinstance(retval, int)
@@ -1238,7 +1257,7 @@ class RedisClient:
 
         """
         mode = "SYNC" if sync else "ASYNC"
-        await self._pool.execute_command("FLUSHALL", mode)
+        await self.execute_command("FLUSHALL", mode)
 
     async def flushdb(self, sync: bool = True) -> None:
         """
@@ -1252,11 +1271,11 @@ class RedisClient:
 
         """
         mode = "SYNC" if sync else "ASYNC"
-        await self._pool.execute_command("FLUSHDB", mode)
+        await self.execute_command("FLUSHDB", mode)
 
     async def ping(self) -> None:
         nonce = str(random.randint(0, 100000))
-        retval = await self._pool.execute_command("PING", nonce)
+        retval = await self.execute_command("PING", nonce)
         if retval != nonce:
             raise RuntimeError(
                 f"PING command returned an unexpected payload (got {retval!r}, "

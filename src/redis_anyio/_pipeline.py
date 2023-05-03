@@ -4,21 +4,23 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from itertools import chain
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from ._connection import RedisConnectionPool
 from ._exceptions import ResponseError
 from ._resp3 import serialize_command
 from ._types import ResponseValue
 
+if TYPE_CHECKING:
+    from ._client import RedisClient
+
 
 @dataclass
 class RedisPipeline:
-    pool: RedisConnectionPool
+    client: RedisClient
     _queued_commands: list[bytes] = field(init=False, default_factory=list)
 
     async def execute(self) -> Sequence[ResponseValue | ResponseError]:
-        return await self.pool.execute_pipeline(self._queued_commands)
+        return await self.client.execute_pipeline(self._queued_commands)
 
     def _queue_command(self, command: str, *args: object) -> None:
         self._queued_commands.append(serialize_command(command, *args))
