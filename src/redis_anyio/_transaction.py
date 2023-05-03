@@ -1,2 +1,0 @@
-class RedisTransaction:
-    pass
