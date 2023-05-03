@@ -188,16 +188,16 @@ class RedisConnection:
     ) -> RESP3Value:
         # Send the command
         payload = serialize_command(command, *args)
-        # with fail_after(self.timeout):
-        logger.debug("Sent data to server: %r", payload)
-        await self._send_stream.send(payload)
+        with fail_after(self.timeout):
+            await self._send_stream.send(payload)
+            logger.debug("Sent data to server: %r", payload)
 
         # Read back the response
         while True:
-            # with fail_after(self.timeout):
-            response = await self._response_stream.receive()
-            if isinstance(response, Exception):
-                raise response
+            with fail_after(self.timeout):
+                response = await self._response_stream.receive()
+                if isinstance(response, Exception):
+                    raise response
 
             if decode:
                 return decode_bytestrings(response)
@@ -380,7 +380,8 @@ class RedisConnectionPool:
         self, command: str, *args: object, decode: bool = True
     ) -> RESP3Value:
         async for attempt in AsyncRetrying(
-            sleep=sleep, retry=retry_if_exception_type(BrokenResourceError)
+            sleep=sleep,
+            retry=retry_if_exception_type((BrokenResourceError, TimeoutError)),
         ):
             with attempt:
                 async with self.acquire() as conn:
@@ -395,7 +396,8 @@ class RedisConnectionPool:
         self, commands: Sequence[bytes]
     ) -> list[RESP3Value | RESP3BlobError | RESP3SimpleError]:
         async for attempt in AsyncRetrying(
-            sleep=sleep, retry=retry_if_exception_type(BrokenResourceError)
+            sleep=sleep,
+            retry=retry_if_exception_type((BrokenResourceError, TimeoutError)),
         ):
             with attempt:
                 async with self.acquire() as conn:
