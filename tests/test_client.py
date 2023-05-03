@@ -8,7 +8,7 @@ from _pytest.fixtures import SubRequest
 from anyio import create_task_group, fail_after, sleep
 from anyio.abc import TaskStatus
 
-from redis_anyio import RedisClient
+from redis_anyio import RedisClient, ResponseError
 
 pytestmark = pytest.mark.anyio
 
@@ -280,15 +280,22 @@ class TestPublishSubscribe:
 
 
 class TestPipeline:
-    async def test_pipeline(self, redis_port: int) -> None:
+    @pytest.mark.parametrize(
+        "transaction",
+        [pytest.param(False, id="pipeline"), pytest.param(True, id="transaction")],
+    )
+    async def test_pipeline(self, redis_port: int, transaction: bool) -> None:
         async with RedisClient(port=redis_port) as client:
             await client.delete("foo")
-            pipeline = client.pipeline()
+            pipeline = client.pipeline(transaction=transaction)
             pipeline.hset("foo", {"key": "value"})
             pipeline.pexpire("foo", 1000)
             pipeline.pttl("foo")
+            pipeline.get("foo")
             results = await pipeline.execute()
-            assert results == [1, 1, 1000]
+            assert results[:3] == [1, 1, 1000]
+            assert isinstance(results[3], ResponseError)
+            assert results[3].code == "WRONGTYPE"
 
 
 class TestLock:

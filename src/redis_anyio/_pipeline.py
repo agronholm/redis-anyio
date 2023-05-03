@@ -17,9 +17,24 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class RedisPipeline:
     client: RedisClient
+    transaction: bool
     queued_commands: list[bytes] = field(init=False, default_factory=list)
 
-    async def execute(self) -> Sequence[ResponseValue | ResponseError]:
+    def __post_init__(self) -> None:
+        if self.transaction:
+            self._queue_command("MULTI")
+
+    async def execute(self) -> Sequence[ResponseValue | ResponseError] | None:
+        """
+        Execute the pipeline.
+
+        :return: a sequence of result values (or response errors) corresponding to the
+            number of queued commands
+
+        """
+        if self.transaction:
+            self._queue_command("EXEC")
+
         return await self.client.execute_pipeline(self)
 
     def _queue_command(self, command: str, *args: object) -> None:
