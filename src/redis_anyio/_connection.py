@@ -13,7 +13,7 @@ from contextlib import (
 from dataclasses import dataclass, field
 from ssl import SSLContext
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, AnyStr, Generic
+from typing import Any, AnyStr, Generic
 
 from anyio import (
     BrokenResourceError,
@@ -24,30 +24,28 @@ from anyio import (
     create_memory_object_stream,
     create_task_group,
     fail_after,
-    get_cancelled_exc_class,
     sleep,
 )
 from anyio.abc import AnyByteSendStream, AnyByteStream, TaskGroup, TaskStatus
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from tenacity import AsyncRetrying, retry_if_exception_type
 
+from ._exceptions import ResponseError
 from ._resp3 import (
     RESP3Attributes,
     RESP3BlobError,
     RESP3Parser,
     RESP3PushData,
     RESP3SimpleError,
-    decode_bytestrings,
     serialize_command,
 )
+from ._types import ResponseValue
+from ._utils import decode_response_value
 
 if sys.version_info >= (3, 11):
     from typing import Self
 else:
     from typing_extensions import Self
-
-if TYPE_CHECKING:
-    from ._resp3 import RESP3Value
 
 PUBSUB_REPLIES = frozenset(
     [
@@ -118,7 +116,9 @@ class Subscription(Generic[AnyStr]):
 class RedisConnection:
     timeout: float | None
     _send_stream: AnyByteSendStream = field(init=False)
-    _response_stream: MemoryObjectReceiveStream[RESP3Value] = field(init=False)
+    _response_stream: MemoryObjectReceiveStream[ResponseValue | ResponseError] = field(
+        init=False
+    )
     _parser: RESP3Parser = field(init=False, default_factory=RESP3Parser)
     # type -> channel/pattern key -> list of subscription objects
     _subscriptions: dict[str, dict[bytes, list[Subscription[Any]]]] = field(
@@ -163,13 +163,22 @@ class RedisConnection:
                     logger.debug("Received data from server: %r", data)
                     self._parser.feed_bytes(data)
                     for item in self._parser:
-                        if (
-                            isinstance(item, RESP3PushData)
-                            and item.type not in PUBSUB_REPLIES
-                        ):
-                            await self._handle_push_data(item)
+                        if isinstance(item, RESP3PushData):
+                            if item.type in PUBSUB_REPLIES:
+                                await send.send(None)
+                            else:
+                                await self._handle_push_data(item)
                         elif isinstance(item, RESP3Attributes):
                             await self._handle_attribute(item)
+                        elif isinstance(item, RESP3SimpleError):
+                            await send.send(ResponseError(item.code, item.message))
+                        elif isinstance(item, RESP3BlobError):
+                            await send.send(
+                                ResponseError(
+                                    item.code.decode("utf-8", errors="replace"),
+                                    item.message.decode("utf-8", errors="replace"),
+                                )
+                            )
                         else:
                             await send.send(item)
             except ClosedResourceError:
@@ -185,7 +194,14 @@ class RedisConnection:
 
     async def execute_command(
         self, command: str, *args: object, decode: bool = True
-    ) -> RESP3Value:
+    ) -> ResponseValue:
+        """
+        Send an arbitrary command to the server, and wait for a response.
+
+        :return: the response sent by the server
+        :raises ResponseError: if the server returns an error response
+
+        """
         # Send the command
         payload = serialize_command(command, *args)
         with fail_after(self.timeout):
@@ -196,23 +212,30 @@ class RedisConnection:
         while True:
             with fail_after(self.timeout):
                 response = await self._response_stream.receive()
-                if isinstance(response, Exception):
+                if isinstance(response, ResponseError):
                     raise response
 
             if decode:
-                return decode_bytestrings(response)
+                return decode_response_value(response)
 
             return response
 
     async def execute_pipeline(
         self, commands: Sequence[bytes]
-    ) -> list[RESP3Value | RESP3BlobError | RESP3SimpleError]:
+    ) -> Sequence[ResponseValue | ResponseError]:
+        """
+        Send a pipeline of commands to the server and wait for all the replies.
+
+        :return: a list of responses or :class:`ResponseError` exceptions, in the same
+            order as the original commands
+
+        """
         # Send the commands
         payload = b"".join(commands)
         await self._send_stream.send(payload)
 
         # Read back the responses
-        responses: list[RESP3Value | RESP3BlobError | RESP3SimpleError] = []
+        responses: list[ResponseValue | ResponseError] = []
         while len(responses) < len(commands):
             with fail_after(self.timeout):
                 responses.append(await self._response_stream.receive())
@@ -378,23 +401,20 @@ class RedisConnectionPool:
 
     async def execute_command(
         self, command: str, *args: object, decode: bool = True
-    ) -> RESP3Value:
+    ) -> ResponseValue:
         async for attempt in AsyncRetrying(
             sleep=sleep,
             retry=retry_if_exception_type((BrokenResourceError, TimeoutError)),
         ):
             with attempt:
                 async with self.acquire() as conn:
-                    try:
-                        return await conn.execute_command(command, *args, decode=decode)
-                    except get_cancelled_exc_class():
-                        raise
+                    return await conn.execute_command(command, *args, decode=decode)
 
         raise AssertionError("Execution should never get to this point")
 
     async def execute_pipeline(
         self, commands: Sequence[bytes]
-    ) -> list[RESP3Value | RESP3BlobError | RESP3SimpleError]:
+    ) -> Sequence[ResponseValue | ResponseError]:
         async for attempt in AsyncRetrying(
             sleep=sleep,
             retry=retry_if_exception_type((BrokenResourceError, TimeoutError)),

@@ -1,5 +1,4 @@
 from ._parser import RESP3Parser as RESP3Parser
-from ._parser import decode_bytestrings as decode_bytestrings
 from ._serializer import serialize_command as serialize_command
 from ._serializer import serialize_value as serialize_value
 from ._types import RESP3Attributes as RESP3Attributes

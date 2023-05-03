@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from redis_anyio import (
+from redis_anyio._resp3 import (
     RESP3Attributes,
     RESP3BlobError,
     RESP3ParseError,

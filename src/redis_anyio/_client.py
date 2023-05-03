@@ -16,6 +16,7 @@ from ._connection import (
 )
 from ._lock import RedisLock
 from ._pipeline import RedisPipeline
+from ._types import ResponseValue
 from ._utils import as_string
 
 if sys.version_info >= (3, 11):
@@ -24,7 +25,7 @@ else:
     from typing_extensions import Self
 
 if TYPE_CHECKING:
-    from ._resp3 import RESP3Value
+    pass
 
 
 class RedisClient:
@@ -49,7 +50,7 @@ class RedisClient:
 
     async def execute_command(
         self, command: str, *args: object, decode: bool = True
-    ) -> RESP3Value:
+    ) -> ResponseValue:
         """
         Execute a command on the Redis server.
 
@@ -61,6 +62,9 @@ class RedisClient:
         :param decode: ``True`` to decode byte strings in the response to strings,
             ``False`` to leave them as is
         :return: the return value of the command
+        :raises ConnectivityError: if there's a connectivity problem (can't connect to
+            the server, connection prematurely closed, etc.)
+        :raises ResponseError: if the server returns an error response
 
         """
         return await self._pool.execute_command(command.upper(), *args, decode=decode)
@@ -418,7 +422,7 @@ class RedisClient:
         .. seealso:: `Official manual page for SCAN <https://redis.io/commands/scan/>`_
         """
 
-        async def iterate_keys(retval: RESP3Value) -> AsyncGenerator[str, None]:
+        async def iterate_keys(retval: ResponseValue) -> AsyncGenerator[str, None]:
             while True:
                 assert isinstance(retval, list) and len(retval) == 2
                 cursor, items = retval
@@ -1265,7 +1269,7 @@ class RedisClient:
 
     async def eval(
         self, script: str, keys: list[str], args: list[object]
-    ) -> RESP3Value:
+    ) -> ResponseValue:
         """
         Run the given Lua script and return its result.
 
@@ -1282,7 +1286,7 @@ class RedisClient:
 
     async def evalsha(
         self, sha1: str, keys: list[str], args: list[object]
-    ) -> RESP3Value:
+    ) -> ResponseValue:
         """
         Run a previously stored Lua script and return its result.
 

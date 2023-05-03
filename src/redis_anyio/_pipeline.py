@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from itertools import chain
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from ._connection import RedisConnectionPool
+from ._exceptions import ResponseError
 from ._resp3 import serialize_command
-
-if TYPE_CHECKING:
-    from ._resp3 import RESP3BlobError, RESP3SimpleError, RESP3Value
+from ._types import ResponseValue
 
 
 @dataclass
@@ -18,7 +17,7 @@ class RedisPipeline:
     pool: RedisConnectionPool
     _queued_commands: list[bytes] = field(init=False, default_factory=list)
 
-    async def execute(self) -> list[RESP3Value | RESP3BlobError | RESP3SimpleError]:
+    async def execute(self) -> Sequence[ResponseValue | ResponseError]:
         return await self.pool.execute_pipeline(self._queued_commands)
 
     def _queue_command(self, command: str, *args: object) -> None:

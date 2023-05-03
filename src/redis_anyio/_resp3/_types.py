@@ -4,7 +4,7 @@ import sys
 from collections.abc import MutableSequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Dict
+from typing import Dict, List, Set, Union
 
 if sys.version_info >= (3, 11):
     from typing import Self
@@ -16,11 +16,22 @@ if sys.version_info >= (3, 10):
 else:
     from typing_extensions import TypeAlias
 
-RESP3Value: TypeAlias = (
-    "None | str | bytes | float | bool | VerbatimString | Decimal | RESP3PushData "
-    "| RESP3Attributes | RESP3SimpleError | RESP3BlobError | list[RESP3Value] "
-    "| set[RESP3Value] | dict[RESP3Value, RESP3Value]"
-)
+RESP3Value: TypeAlias = Union[
+    None,
+    str,
+    bytes,
+    float,
+    bool,
+    "VerbatimString",
+    Decimal,
+    "RESP3PushData",
+    "RESP3Attributes",
+    "RESP3SimpleError",
+    "RESP3BlobError",
+    List["RESP3Value"],
+    Set["RESP3Value"],
+    Dict["RESP3Value", "RESP3Value"],
+]
 
 
 @dataclass
@@ -72,7 +83,8 @@ class RESP3ParseError(Exception):
     """
 
 
-class RESP3SimpleError(Exception):
+@dataclass
+class RESP3SimpleError:
     """
     Represents a (unicode) error returned from the server.
 
@@ -90,16 +102,12 @@ class RESP3SimpleError(Exception):
     code: str
     message: str
 
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(code, message)
-        self.code = code
-        self.message = message
-
     def __str__(self) -> str:
         return self.message
 
 
-class RESP3BlobError(Exception):
+@dataclass
+class RESP3BlobError:
     """
     Represents a binary safe error returned from the server.
 
@@ -116,11 +124,6 @@ class RESP3BlobError(Exception):
 
     code: bytes
     message: bytes
-
-    def __init__(self, code: bytes, message: bytes) -> None:
-        super().__init__(code, message)
-        self.code = code
-        self.message = message
 
     def __str__(self) -> str:
         return self.message.decode("utf-8", errors="replace")

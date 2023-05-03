@@ -4,8 +4,7 @@ from decimal import Decimal
 
 import pytest
 
-from redis_anyio import RESP3Value
-from redis_anyio._resp3 import serialize_command, serialize_value
+from redis_anyio._resp3 import RESP3Value, serialize_command, serialize_value
 
 
 @pytest.mark.parametrize(

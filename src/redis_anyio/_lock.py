@@ -10,10 +10,11 @@ from uuid import uuid4
 from anyio import Event, Lock, create_task_group, move_on_after, sleep
 from anyio.abc import TaskGroup, TaskStatus
 
-from ._resp3 import RESP3SimpleError
+from ._exceptions import RedisError, ResponseError
+from ._types import ResponseValue
 
 if TYPE_CHECKING:
-    from redis_anyio import RedisClient, RESP3Value
+    from ._client import RedisClient
 
 ACQUIRE_SCRIPT = """\
     local token = redis.call("get", KEYS[1])
@@ -46,7 +47,7 @@ RELEASE_SCRIPT = """\
 RELEASE_SCRIPT_SHA = hashlib.new("sha1", RELEASE_SCRIPT.encode("ascii")).hexdigest()
 
 
-class LostLockError(Exception):
+class LostLockError(RedisError):
     """Raised when we failed to extend our lease on the Redis lock."""
 
 
@@ -71,10 +72,10 @@ class RedisLock:
 
     async def _run_script(
         self, source: str, script_sha1: str, *args: object
-    ) -> RESP3Value:
+    ) -> ResponseValue:
         try:
             return await self.client.evalsha(script_sha1, [self.name], list(args))
-        except RESP3SimpleError as exc:
+        except ResponseError as exc:
             if exc.code != "NOSCRIPT":
                 raise
 

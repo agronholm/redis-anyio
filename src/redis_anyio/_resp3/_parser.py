@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
 from ._types import (
     RESP3Attributes,
@@ -11,6 +10,7 @@ from ._types import (
     RESP3ParseError,
     RESP3PushData,
     RESP3SimpleError,
+    RESP3Value,
     VerbatimString,
 )
 
@@ -18,9 +18,6 @@ if sys.version_info >= (3, 11):
     from typing import Self
 else:
     from typing_extensions import Self
-
-if TYPE_CHECKING:
-    from ._types import RESP3Value
 
 
 class _NotEnoughData:
@@ -407,20 +404,3 @@ class RESP3Parser:
 
     def feed_bytes(self, data: bytes) -> None:
         self._buffer += data
-
-
-def decode_bytestrings(value: RESP3Value) -> RESP3Value:
-    if isinstance(value, bytes):
-        return value.decode("utf-8")
-    elif isinstance(value, list):
-        return [decode_bytestrings(x) for x in value]
-    elif isinstance(value, set):
-        return {decode_bytestrings(x) for x in value}
-    elif isinstance(value, dict):
-        return {decode_bytestrings(k): decode_bytestrings(v) for k, v in value.items()}
-    elif isinstance(value, RESP3PushData):
-        value.data = [decode_bytestrings(x) for x in value.data]
-    elif isinstance(value, RESP3Attributes):
-        return RESP3Attributes(value)
-
-    return value

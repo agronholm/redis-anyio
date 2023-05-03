@@ -13,10 +13,6 @@ Types
 
 .. autoclass:: VerbatimString
 
-.. autoclass:: RESP3SimpleError
-
-.. autoclass:: RESP3BlobError
-
 .. autoclass:: Subscription
 
 .. autoclass:: RedisPipeline
@@ -28,8 +24,10 @@ Types
 Exceptions
 ==========
 
-.. autoexception:: RESP3BlobError
+.. autoexception:: RedisError
 
-.. autoexception:: RESP3SimpleError
+.. autoexception:: ResponseError
 
-.. autoexception:: RESP3ParseError
+.. autoexception:: ConnectivityError
+
+.. autoexception:: ProtocolError
