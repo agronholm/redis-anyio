@@ -203,7 +203,7 @@ class RedisClient:
 
         :return: the number of keys that was removed.
 
-        .. seealso:: `Official manual page <https://redis.io/commands/del/>`_
+        .. seealso:: `Official manual page for DEL <https://redis.io/commands/del/>`_
 
         """
         return cast(int, await self.execute_command("DEL", key, *keys))
