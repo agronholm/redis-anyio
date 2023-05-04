@@ -1,6 +1,7 @@
 from ._client import RedisClient as RedisClient
 from ._connection import RedisConnectionPoolStatistics as RedisConnectionPoolStatistics
 from ._connection import Subscription as Subscription
+from ._exceptions import ConnectivityError as ConnectivityError
 from ._exceptions import ProtocolError as ProtocolError
 from ._exceptions import RedisError as RedisError
 from ._exceptions import ResponseError as ResponseError
