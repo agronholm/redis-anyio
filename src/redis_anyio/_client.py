@@ -197,7 +197,7 @@ class RedisClient:
     # Basic key operations
     #
 
-    async def delete(self, /, key: str, *keys: str) -> int:
+    async def delete(self, *keys: str) -> int:
         """
         Delete one or more keys in the database.
 
@@ -206,7 +206,7 @@ class RedisClient:
         .. seealso:: `Official manual page for DEL <https://redis.io/commands/del/>`_
 
         """
-        return cast(int, await self.execute_command("DEL", key, *keys))
+        return cast(int, await self.execute_command("DEL", *keys))
 
     @overload
     async def get(self, key: str, *, decode: Literal[False]) -> bytes | None:
@@ -214,6 +214,10 @@ class RedisClient:
 
     @overload
     async def get(self, key: str, *, decode: Literal[True] = ...) -> str | None:
+        ...
+
+    @overload
+    async def get(self, key: str, *, decode: bool) -> str | bytes | None:
         ...
 
     async def get(self, key: str, *, decode: bool = True) -> str | bytes | None:
@@ -266,6 +270,24 @@ class RedisClient:
         keepttl: bool = False,
         decode: Literal[False],
     ) -> bytes | None:
+        ...
+
+    @overload
+    async def set(
+        self,
+        key: str,
+        value: str | bytes,
+        *,
+        nx: bool = False,
+        xx: bool = False,
+        get: bool = False,
+        ex: int | None = None,
+        px: int | None = None,
+        exat: int | None = None,
+        pxat: int | None = None,
+        keepttl: bool = False,
+        decode: bool,
+    ) -> str | bytes | None:
         ...
 
     async def set(
@@ -342,6 +364,10 @@ class RedisClient:
 
     @overload
     async def mget(self, *keys: str, decode: Literal[False]) -> list[bytes]:
+        ...
+
+    @overload
+    async def mget(self, *keys: str, decode: bool) -> list[str] | list[bytes]:
         ...
 
     async def mget(self, *keys: str, decode: bool = True) -> list[str] | list[bytes]:
@@ -1029,6 +1055,12 @@ class RedisClient:
     ) -> list[bytes]:
         ...
 
+    @overload
+    async def rpop(
+        self, key: str, count: int = 1, *, decode: bool
+    ) -> list[str] | list[bytes]:
+        ...
+
     async def rpop(
         self, key: str, count: int = 1, *, decode: bool = True
     ) -> list[str] | list[bytes]:
@@ -1087,6 +1119,24 @@ class RedisClient:
     # String operations
     #
 
+    @overload
+    async def getrange(
+        self, key: str, start: int, end: int, decode: Literal[True] = ...
+    ) -> str:
+        ...
+
+    @overload
+    async def getrange(
+        self, key: str, start: int, end: int, decode: Literal[False]
+    ) -> bytes:
+        ...
+
+    @overload
+    async def getrange(
+        self, key: str, start: int, end: int, decode: bool
+    ) -> str | bytes:
+        ...
+
     async def getrange(
         self, key: str, start: int, end: int, decode: bool = True
     ) -> str | bytes:
@@ -1109,17 +1159,13 @@ class RedisClient:
             await self.execute_command("GETRANGE", key, start, end, decode=decode),
         )
 
-    async def setrange(
-        self, key: str, offset: int, value: str, decode: bool = True
-    ) -> int:
+    async def setrange(self, key: str, offset: int, value: str) -> int:
         """
         Overwrite part of the specific string key.
 
         :param key: the key to modify
         :param offset: offset (in bytes) where to place the replacement string
         :param value: the string to place at the offset
-        :param decode: ``True`` to decode byte strings in the response to strings,
-            ``False`` to leave them as is
         :return: the length of the string after the modification
 
         .. warning:: Take care when modifying multibyte (outside of the ASCII range)
@@ -1129,9 +1175,7 @@ class RedisClient:
             `Official manual page for SETRANGE <https://redis.io/commands/setrange/>`_
 
         """
-        retval = await self.execute_command(
-            "SETRANGE", key, offset, value, decode=decode
-        )
+        retval = await self.execute_command("SETRANGE", key, offset, value)
         assert isinstance(retval, int)
         return retval
 
@@ -1164,6 +1208,10 @@ class RedisClient:
 
     @overload
     async def hget(self, key: str, field: str, decode: Literal[False]) -> bytes | None:
+        ...
+
+    @overload
+    async def hget(self, key: str, field: str, decode: bool) -> str | bytes | None:
         ...
 
     async def hget(
@@ -1229,6 +1277,12 @@ class RedisClient:
     @overload
     async def hmget(
         self, key: str, *fields: str, decode: Literal[False]
+    ) -> list[str | None] | list[bytes | None]:
+        ...
+
+    @overload
+    async def hmget(
+        self, key: str, *fields: str, decode: bool
     ) -> list[str | None] | list[bytes | None]:
         ...
 
@@ -1320,7 +1374,7 @@ class RedisClient:
     #
 
     async def eval(
-        self, script: str, keys: list[str], args: list[object]
+        self, script: str, keys: list[str], args: list[object], *, decode: bool = True
     ) -> ResponseValue:
         """
         Run the given Lua script and return its result.
@@ -1328,16 +1382,20 @@ class RedisClient:
         :param script: the source code of the script
         :param keys: the list of keys used in the script
         :param args: the list of arguments passed to the script
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False`` to leave them as is
         :return: the return value of the script
 
         .. seealso::
             `Official manual page for EVAL <https://redis.io/commands/eval/>`_
 
         """
-        return await self.execute_command("EVAL", script, len(keys), *keys, *args)
+        return await self.execute_command(
+            "EVAL", script, len(keys), *keys, *args, decode=decode
+        )
 
     async def evalsha(
-        self, sha1: str, keys: list[str], args: list[object]
+        self, sha1: str, keys: list[str], args: list[object], *, decode: bool = True
     ) -> ResponseValue:
         """
         Run a previously stored Lua script and return its result.
@@ -1345,13 +1403,17 @@ class RedisClient:
         :param sha1: hex digest of a SHA-1 hash made from the script
         :param keys: the list of keys used in the script
         :param args: the list of arguments passed to the script
+        :param decode: ``True`` to decode byte strings in the response to strings,
+            ``False`` to leave them as is
         :return: the return value of the script
 
         .. seealso::
             `Official manual page for EVALSHA <https://redis.io/commands/evalsha/>`_
 
         """
-        return await self.execute_command("EVALSHA", sha1, len(keys), *keys, *args)
+        return await self.execute_command(
+            "EVALSHA", sha1, len(keys), *keys, *args, decode=decode
+        )
 
     async def script_load(self, script: str) -> str:
         """
@@ -1516,6 +1578,22 @@ class RedisClient:
             "SUNSUBSCRIBE",
         )
         return Subscription[str](*args) if decode else Subscription[bytes](*args)
+
+    @overload
+    def psubscribe(
+        self, *patterns: str, decode: Literal[True] = ...
+    ) -> Subscription[str]:
+        ...
+
+    @overload
+    def psubscribe(self, *patterns: str, decode: Literal[False]) -> Subscription[bytes]:
+        ...
+
+    @overload
+    def psubscribe(
+        self, *patterns: str, decode: bool
+    ) -> Subscription[str] | Subscription[bytes]:
+        ...
 
     def psubscribe(
         self, *patterns: str, decode: bool = True
