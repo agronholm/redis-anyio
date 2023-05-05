@@ -6,14 +6,13 @@ import sys
 from collections import defaultdict, deque
 from collections.abc import AsyncGenerator, Generator
 from contextlib import (
-    AsyncExitStack,
     asynccontextmanager,
     contextmanager,
 )
 from dataclasses import dataclass, field
 from ssl import SSLContext
 from types import TracebackType
-from typing import Any, AnyStr, Generic
+from typing import Any
 
 from anyio import (
     ClosedResourceError,
@@ -25,7 +24,7 @@ from anyio import (
     fail_after,
 )
 from anyio.abc import AnyByteSendStream, AnyByteStream, TaskGroup, TaskStatus
-from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
+from anyio.streams.memory import MemoryObjectReceiveStream
 
 from ._exceptions import ResponseError
 from ._resp3 import (
@@ -36,6 +35,7 @@ from ._resp3 import (
     RESP3SimpleError,
     serialize_command,
 )
+from ._subscription import Subscription
 from ._types import ResponseValue
 from ._utils import decode_response_value
 
@@ -56,57 +56,6 @@ PUBSUB_REPLIES = frozenset(
 )
 
 logger = logging.getLogger("redis_anyio")
-
-
-@dataclass(eq=False)
-class Subscription(Generic[AnyStr]):
-    pool: RedisConnectionPool
-    channels: tuple[str, ...]
-    subscribe_category: str
-    message_category: str
-    decode: bool
-    subscribe_command: str
-    unsubscribe_command: str
-    _exit_stack: AsyncExitStack = field(init=False, default_factory=AsyncExitStack)
-    _conn: RedisConnection = field(init=False)
-    _send_stream: MemoryObjectSendStream[tuple[str, AnyStr]] = field(init=False)
-    _receive_stream: MemoryObjectReceiveStream[tuple[str, AnyStr]] = field(init=False)
-
-    async def _subscribe(self) -> None:
-        self._conn = await self._exit_stack.enter_async_context(self.pool.acquire())
-        self._send_stream, self._receive_stream = create_memory_object_stream(5)
-        await self._exit_stack.enter_async_context(self._receive_stream)
-        self._exit_stack.enter_context(self._conn.add_subscription(self))
-        await self._conn.execute_command(self.subscribe_command, *self.channels)
-        self._exit_stack.push_async_callback(
-            self._conn.execute_command, self.unsubscribe_command, *self.channels
-        )
-
-    async def __aenter__(self) -> Self:
-        await self._exit_stack.__aenter__()
-        await self._subscribe()
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
-
-    def __aiter__(self) -> Self:
-        return self
-
-    async def __anext__(self) -> tuple[str, AnyStr]:
-        try:
-            return await self._receive_stream.receive()
-        except BaseException:
-            await self._exit_stack.__aexit__(*sys.exc_info())
-            raise
-
-    async def deliver(self, channel: str, message: AnyStr) -> None:
-        await self._send_stream.send((channel, message))
 
 
 @dataclass
@@ -132,14 +81,7 @@ class RedisConnection:
             channel = item.data[-2].decode("utf-8", errors="backslashreplace")
             async with create_task_group() as tg:
                 for subscription in subscriptions:
-                    if subscription.decode:
-                        message: str | bytes = item.data[-1].decode(
-                            "utf-8", errors="backslashreplace"
-                        )
-                    else:
-                        message = item.data[-1]
-
-                    tg.start_soon(subscription.deliver, channel, message)
+                    tg.start_soon(subscription.deliver, channel, item.data[-1])
 
     async def _handle_attribute(self, attribute: RESP3Attributes) -> None:
         pass  # Drop attributes on the floor for now

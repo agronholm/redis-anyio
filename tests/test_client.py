@@ -9,6 +9,7 @@ from anyio import create_task_group, fail_after, sleep
 from anyio.abc import TaskStatus
 
 from redis_anyio import RedisClient, ResponseError
+from redis_anyio._subscription import Message
 
 pytestmark = pytest.mark.anyio
 
@@ -214,15 +215,15 @@ class TestPublishSubscribe:
 
         if decode:
             assert messages == [
-                ("channel1", "Hello"),
-                ("channel2", "World!"),
-                ("channel1", "åäö"),
+                Message("channel1", "Hello"),
+                Message("channel2", "World!"),
+                Message("channel1", "åäö"),
             ]
         else:
             assert messages == [
-                ("channel1", b"Hello"),
-                ("channel2", b"World!"),
-                ("channel1", b"\xc3\xa5\xc3\xa4\xc3\xb6"),
+                Message("channel1", b"Hello"),
+                Message("channel2", b"World!"),
+                Message("channel1", b"\xc3\xa5\xc3\xa4\xc3\xb6"),
             ]
 
     async def test_ssubscribe(self, redis7_port: int, decode: bool) -> None:
@@ -241,15 +242,15 @@ class TestPublishSubscribe:
 
         if decode:
             assert messages == [
-                ("channel1", "Hello"),
-                ("channel2", "World!"),
-                ("channel1", "åäö"),
+                Message("channel1", "Hello"),
+                Message("channel2", "World!"),
+                Message("channel1", "åäö"),
             ]
         else:
             assert messages == [
-                ("channel1", b"Hello"),
-                ("channel2", b"World!"),
-                ("channel1", b"\xc3\xa5\xc3\xa4\xc3\xb6"),
+                Message("channel1", b"Hello"),
+                Message("channel2", b"World!"),
+                Message("channel1", b"\xc3\xa5\xc3\xa4\xc3\xb6"),
             ]
 
     async def test_psubscribe(self, redis_port: int, decode: bool) -> None:
@@ -268,15 +269,15 @@ class TestPublishSubscribe:
 
         if decode:
             assert messages == [
-                ("channel1", "Hello"),
-                ("channel2", "World!"),
-                ("channel1", "åäö"),
+                Message("channel1", "Hello"),
+                Message("channel2", "World!"),
+                Message("channel1", "åäö"),
             ]
         else:
             assert messages == [
-                ("channel1", b"Hello"),
-                ("channel2", b"World!"),
-                ("channel1", b"\xc3\xa5\xc3\xa4\xc3\xb6"),
+                Message("channel1", b"Hello"),
+                Message("channel2", b"World!"),
+                Message("channel1", b"\xc3\xa5\xc3\xa4\xc3\xb6"),
             ]
 
 

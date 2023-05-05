@@ -15,6 +15,8 @@ Types
 
 .. autoclass:: Subscription
 
+.. autoclass:: Message
+
 .. autoclass:: RedisPipeline
 
 .. autoclass:: RedisTransaction

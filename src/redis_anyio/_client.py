@@ -15,11 +15,11 @@ from tenacity import AsyncRetrying, retry_if_exception_type
 from ._connection import (
     RedisConnectionPool,
     RedisConnectionPoolStatistics,
-    Subscription,
 )
 from ._exceptions import ConnectivityError
 from ._lock import RedisLock
 from ._pipeline import RedisPipeline, RedisTransaction
+from ._subscription import Subscription
 from ._types import ResponseValue
 from ._utils import as_string
 
