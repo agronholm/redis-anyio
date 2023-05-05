@@ -10,7 +10,7 @@ Quick links
    :maxdepth: 1
 
    userguide
-   features
+   differences
    contributing
    api
    versionhistory
