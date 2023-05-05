@@ -4,7 +4,7 @@ import logging
 import random
 import sys
 from collections import defaultdict, deque
-from collections.abc import AsyncGenerator, Generator, Sequence
+from collections.abc import AsyncGenerator, Generator
 from contextlib import (
     AsyncExitStack,
     asynccontextmanager,
@@ -28,7 +28,6 @@ from anyio.abc import AnyByteSendStream, AnyByteStream, TaskGroup, TaskStatus
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
 from ._exceptions import ResponseError
-from ._pipeline import RedisPipeline
 from ._resp3 import (
     RESP3Attributes,
     RESP3BlobError,
@@ -190,6 +189,22 @@ class RedisConnection:
 
         return True
 
+    async def send_command(self, command: str, *args: object) -> None:
+        payload = serialize_command(command, *args)
+        with fail_after(self.timeout):
+            await self._send_stream.send(payload)
+            logger.debug("Sent data to server: %r", payload)
+
+    async def read_next_response(
+        self, *, decode: bool
+    ) -> ResponseValue | ResponseError:
+        with fail_after(self.timeout):
+            response = await self._response_stream.receive()
+            if decode and not isinstance(response, ResponseError):
+                response = decode_response_value(response)
+
+            return response
+
     async def execute_command(
         self, command: str, *args: object, decode: bool = True
     ) -> ResponseValue:
@@ -200,45 +215,15 @@ class RedisConnection:
         :raises ResponseError: if the server returns an error response
 
         """
-        # Send the command
-        payload = serialize_command(command, *args)
-        with fail_after(self.timeout):
-            await self._send_stream.send(payload)
-            logger.debug("Sent data to server: %r", payload)
+        await self.send_command(command, *args)
 
         # Read back the response
-        while True:
-            with fail_after(self.timeout):
-                response = await self._response_stream.receive()
-                if isinstance(response, ResponseError):
-                    raise response
+        with fail_after(self.timeout):
+            response = await self.read_next_response(decode=decode)
+            if isinstance(response, ResponseError):
+                raise response
 
-            if decode:
-                return decode_response_value(response)
-
-            return response
-
-    async def execute_pipeline(
-        self, pipeline: RedisPipeline
-    ) -> Sequence[ResponseValue | ResponseError]:
-        """
-        Send a pipeline of commands to the server and wait for all the replies.
-
-        :return: a list of responses or :class:`ResponseError` exceptions, in the same
-            order as the original commands
-
-        """
-        # Send the commands
-        payload = b"".join(pipeline.queued_commands)
-        await self._send_stream.send(payload)
-
-        # Read back the responses
-        responses: list[ResponseValue | ResponseError] = []
-        while len(responses) < len(pipeline.queued_commands):
-            with fail_after(self.timeout):
-                responses.append(await self._response_stream.receive())
-
-        return responses
+        return response
 
     @contextmanager
     def add_subscription(

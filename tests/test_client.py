@@ -280,22 +280,46 @@ class TestPublishSubscribe:
 
 
 class TestPipeline:
-    @pytest.mark.parametrize(
-        "transaction",
-        [pytest.param(False, id="pipeline"), pytest.param(True, id="transaction")],
-    )
-    async def test_pipeline(self, redis_port: int, transaction: bool) -> None:
+    async def test_pipeline(self, redis_port: int) -> None:
         async with RedisClient(port=redis_port) as client:
             await client.delete("foo")
-            pipeline = client.pipeline(transaction=transaction)
+            pipeline = client.pipeline()
             pipeline.hset("foo", {"key": "value"})
             pipeline.pexpire("foo", 1000)
             pipeline.pttl("foo")
             pipeline.get("foo")
             results = await pipeline.execute()
-            assert results[:3] == [1, 1, 1000]
+            assert results[:2] == [1, 1]
+            assert isinstance(results[2], int)
+            assert 990 < results[2] <= 1000
             assert isinstance(results[3], ResponseError)
             assert results[3].code == "WRONGTYPE"
+
+
+class TestTransaction:
+    async def test_transaction(self, redis_port: int) -> None:
+        async with RedisClient(port=redis_port) as client:
+            await client.delete("foo")
+            transaction = client.transaction()
+            transaction.hset("foo", {"key": "value"})
+            transaction.pexpire("foo", 1000)
+            transaction.pttl("foo")
+            results = await transaction.execute()
+            assert isinstance(results[2], int)
+            assert results[:2] == [1, 1]
+            assert 990 < results[2] <= 1000
+
+    async def test_transaction_aborted(self, redis_port: int) -> None:
+        async with RedisClient(port=redis_port) as client:
+            await client.delete("foo")
+            transaction = client.transaction()
+            transaction.set("foo", "value")
+            transaction.queue_command("FOOBAR")
+
+            with pytest.raises(ResponseError, match="ERR unknown command"):
+                await transaction.execute()
+
+            assert await client.get("foo") is None
 
 
 class TestLock:

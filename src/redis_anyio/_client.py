@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 import sys
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from itertools import chain
@@ -17,10 +17,9 @@ from ._connection import (
     RedisConnectionPoolStatistics,
     Subscription,
 )
-from ._exceptions import ConnectivityError, ResponseError
+from ._exceptions import ConnectivityError
 from ._lock import RedisLock
-from ._pipeline import RedisPipeline
-from ._resp3 import RESP3BlobError, RESP3SimpleError
+from ._pipeline import RedisPipeline, RedisTransaction
 from ._types import ResponseValue
 from ._utils import as_string
 
@@ -79,40 +78,6 @@ class RedisClient:
             with attempt:
                 async with self._pool.acquire() as conn:
                     return await conn.execute_command(command, *args, decode=decode)
-
-        raise AssertionError("Execution should never get to this point")
-
-    async def execute_pipeline(
-        self, pipeline: RedisPipeline
-    ) -> Sequence[ResponseValue | ResponseError] | None:
-        async for attempt in AsyncRetrying(
-            sleep=sleep,
-            retry=retry_if_exception_type(ConnectivityError),
-        ):
-            with attempt:
-                async with self._pool.acquire() as conn:
-                    results = await conn.execute_pipeline(pipeline)
-                    if pipeline.transaction:
-                        # For transactions, the last item is the actual results array.
-                        # A null result means the transaction was aborted.
-                        if results[-1] is None:
-                            return None
-
-                        assert isinstance(results[-1], list)
-                        results = results[-1]
-
-                    for index, element in enumerate(results):
-                        if isinstance(element, RESP3SimpleError):
-                            results[index] = ResponseError(
-                                element.code, element.message
-                            )
-                        elif isinstance(element, RESP3BlobError):
-                            results[index] = ResponseError(
-                                element.code.decode("utf-8", errors="replace"),
-                                element.message.decode("utf-8", errors="replace"),
-                            )
-
-                    return results
 
         raise AssertionError("Execution should never get to this point")
 
@@ -178,20 +143,28 @@ class RedisClient:
 
         return RedisLock(name, lifetime_ms, extend_interval_ms, retry_interval_ms, self)
 
-    def pipeline(self, *, transaction: bool = True) -> RedisPipeline:
+    def pipeline(self) -> RedisPipeline:
         """
         Create a new command pipeline bound to this client.
 
-        :param transaction: ``True`` to wrap the pipeline in ``MULTI`` and ``EXEC``
-            commands to perform the queued commands atomically
-
         .. seealso:: `Redis pipelining <https://redis.io/docs/manual/pipelining/>`
+
+        """
+        return RedisPipeline(self._pool)
+
+    def transaction(self) -> RedisTransaction:
+        """
+        Create a new transaction bound to this client.
+
+        A transaction is a pipeline with slightly different semantics. See the
+        documentation of the :class:`RedisTransaction` class for further details.
+
         .. seealso::
             `How transactions work in Redis
             <https://redis.io/docs/manual/transactions/>`
 
         """
-        return RedisPipeline(self, transaction)
+        return RedisTransaction(self._pool)
 
     #
     # Basic key operations

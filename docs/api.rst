@@ -17,6 +17,8 @@ Types
 
 .. autoclass:: RedisPipeline
 
+.. autoclass:: RedisTransaction
+
 .. autoclass:: RedisConnectionPoolStatistics
 
 .. autoclass:: RedisLock
