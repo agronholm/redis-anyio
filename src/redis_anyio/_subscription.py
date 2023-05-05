@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from types import TracebackType
 from typing import TYPE_CHECKING, AnyStr, Generic
 
-from anyio import create_memory_object_stream
+from anyio import ClosedResourceError, create_memory_object_stream
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
 if TYPE_CHECKING:
@@ -58,9 +58,13 @@ class Subscription(Generic[AnyStr]):
         await self._exit_stack.enter_async_context(self._receive_stream)
         self._exit_stack.enter_context(self._conn.add_subscription(self))
         await self._conn.execute_command(self.subscribe_command, *self.channels)
-        self._exit_stack.push_async_callback(
-            self._conn.execute_command, self.unsubscribe_command, *self.channels
-        )
+        self._exit_stack.push_async_callback(self._unsubscribe)
+
+    async def _unsubscribe(self) -> None:
+        try:
+            await self._conn.execute_command(self.unsubscribe_command, *self.channels)
+        except ClosedResourceError:
+            pass
 
     async def __aenter__(self) -> Self:
         await self._exit_stack.__aenter__()
