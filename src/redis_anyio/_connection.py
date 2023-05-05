@@ -95,7 +95,7 @@ class Subscription(Generic[AnyStr]):
     ) -> None:
         await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
 
-    async def __aiter__(self) -> Self:
+    def __aiter__(self) -> Self:
         return self
 
     async def __anext__(self) -> tuple[str, AnyStr]:

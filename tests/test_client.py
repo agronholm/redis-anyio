@@ -209,7 +209,8 @@ class TestPublishSubscribe:
             ) as subscription, create_task_group() as tg:
                 tg.start_soon(publish_messages)
                 with fail_after(2):
-                    messages = [await subscription.__anext__() for _ in range(3)]
+                    iterator = subscription.__aiter__()
+                    messages = [await iterator.__anext__() for _ in range(3)]
 
         if decode:
             assert messages == [
