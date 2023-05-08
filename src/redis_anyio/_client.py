@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import random
 import sys
+from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from itertools import chain
 from types import TracebackType
-from typing import Literal, cast, overload
+from typing import Any, AnyStr, Generic, Literal, cast, overload
 
 from tenacity import (
     stop_never,
@@ -17,6 +19,7 @@ from tenacity.stop import stop_base
 from tenacity.wait import wait_base
 
 from ._connection import (
+    RedisConnection,
     RedisConnectionPool,
     RedisConnectionPoolStatistics,
 )
@@ -1268,6 +1271,79 @@ class RedisClient:
         assert isinstance(retval, dict)
         return cast("dict[str, str] | dict[bytes, bytes]", retval)
 
+    async def hincrby(self, key: str, field: str, increment: int) -> int:
+        """
+        Increment the value of the specified field in the given hash map.
+
+        If the field does not exist already, it will be created, with ``increment`` as
+        the value.
+
+        :param key: the hash map
+        :param field: the name of the field to increment
+        :param increment: the value to increment the field by
+        :return: the value of the field after the increment operation
+
+        .. seealso::
+            `Official manual page for HINCRBY <https://redis.io/commands/hincrby/>`_
+
+        """
+        retval = await self.execute_command("HINCRBY", key, field, increment)
+        assert isinstance(retval, int)
+        return retval
+
+    async def hincrbyfloat(self, key: str, field: str, increment: float) -> str:
+        """
+        Increment the value of the specified field in the given hash map by a floating
+        point value.
+
+        If the field does not exist already, it will be created, with ``increment`` as
+        the value.
+
+        :param key: the hash map
+        :param field: the name of the field to increment
+        :param increment: the (float) value to increment the field by
+        :return: the value of the field after the increment operation, as a string
+
+        .. seealso::
+            `Official manual page for HINCRBYFLOAT
+            <https://redis.io/commands/hincrbyfloat/>`_
+
+        """
+        retval = await self.execute_command("HINCRBYFLOAT", key, field, increment)
+        assert isinstance(retval, str)
+        return retval
+
+    async def hkeys(self, key: str) -> list[str]:
+        """
+        Return the keys present in the given hash map.
+
+        :param key: the hash map
+        :return: the list of keys in the hash map, or an empty list if the hash map
+            doesn't exist
+
+        .. seealso::
+            `Official manual page for HKEYS <https://redis.io/commands/hkeys/>`_
+
+        """
+        retval = await self.execute_command("HKEYS", key)
+        assert isinstance(retval, list)
+        return cast("list[str]", retval)
+
+    async def hlen(self, key: str) -> int:
+        """
+        Return the number of keys present in the given hash map.
+
+        :param key: the hash map
+        :return: the number of keys in the hash map, or 0 if the hash map doesn't exist
+
+        .. seealso::
+            `Official manual page for HLEN <https://redis.io/commands/hlen/>`_
+
+        """
+        retval = await self.execute_command("HLEN", key)
+        assert isinstance(retval, int)
+        return retval
+
     @overload
     async def hmget(
         self, key: str, *fields: str, decode: Literal[True] = ...
@@ -1307,7 +1383,230 @@ class RedisClient:
         assert isinstance(retval, list)
         return cast("list[str | None] | list[bytes | None]", retval)
 
-    async def hset(self, key: str, values: Mapping[str | bytes, object]) -> int:
+    @overload
+    async def hrandfield(
+        self,
+        key: str,
+        count: int | None = ...,
+        *,
+        withvalues: bool = ...,
+        decode: Literal[True] = ...,
+    ) -> str | list[str] | Mapping[str, str] | None:
+        ...
+
+    @overload
+    async def hrandfield(
+        self,
+        key: str,
+        count: int | None = ...,
+        *,
+        withvalues: bool = ...,
+        decode: Literal[False],
+    ) -> bytes | list[str] | Mapping[str, bytes] | None:
+        ...
+
+    @overload
+    async def hrandfield(
+        self, key: str, count: int | None = ..., *, withvalues: bool = ..., decode: bool
+    ) -> str | bytes | list[str] | Mapping[str, str] | Mapping[str, bytes] | None:
+        ...
+
+    async def hrandfield(
+        self,
+        key: str,
+        count: int | None = None,
+        *,
+        withvalues: bool = False,
+        decode: bool = True,
+    ) -> str | bytes | list[str] | list[bytes] | Mapping[str, str] | Mapping[
+        str, bytes
+    ] | None:
+        """
+        Retrieve the value(s) of one or more random fields in the given hash map.
+
+        :param key: the hash map
+        :param count: if given, the number of fields to fetch (can be negative; see the
+            official documentation for details)
+        :param withvalues: if ``True``, return a mapping of random fields to their
+            values
+        :param decode: ``True`` to decode byte strings in field values to strings,
+            ``False`` to leave them as is (applied only when ``count`` is specified and
+            ``withvalues`` is ``True``)
+        :return:
+            * ``None`` if the hash map didn't exist
+            * If no ``count`` was specified: the value of a random field
+            * If no ``count`` was specified, if ``count`` was not given; otherwise, a
+              list of the fetched values
+
+        .. seealso::
+            `Official manual page for HRANDFIELD
+            <https://redis.io/commands/hrandfield/>`_
+
+        """
+        args: list[object] = []
+        if count is not None:
+            args.append(count)
+
+        if withvalues:
+            args.append("WITHVALUES")
+
+        retval = await self.execute_command("HRANDFIELD", key, *args, decode=False)
+        if retval is None:
+            return None
+
+        if isinstance(retval, list):
+            if withvalues:
+                keyvalues = cast("list[list[bytes]]", retval)
+                if decode:
+                    return {
+                        as_string(item[0]): as_string(item[1]) for item in keyvalues
+                    }
+                else:
+                    return {as_string(item[0]): item[1] for item in keyvalues}
+            else:
+                keylist = cast("list[bytes]", retval)
+                return [
+                    key.decode("utf-8", errors="backslashreplace") for key in keylist
+                ]
+
+        assert isinstance(retval, bytes)
+        if decode:
+            return retval.decode("utf-8", errors="backslashreplace")
+        else:
+            return retval
+
+    @overload
+    def hscan(
+        self,
+        key: str,
+        *,
+        match: str | None = None,
+        count: int | None,
+        decode: Literal[True] = ...,
+    ) -> AbstractAsyncContextManager[AsyncIterator[tuple[str, str]]]:
+        ...
+
+    @overload
+    def hscan(
+        self,
+        key: str,
+        *,
+        match: str | None = None,
+        count: int | None,
+        decode: Literal[False],
+    ) -> AbstractAsyncContextManager[AsyncIterator[tuple[str, bytes]]]:
+        ...
+
+    @overload
+    def hscan(
+        self,
+        key: str,
+        *,
+        match: str | None = None,
+        count: int | None,
+        decode: bool,
+    ) -> (
+        AbstractAsyncContextManager[AsyncIterator[tuple[str, str]]]
+        | AbstractAsyncContextManager[AsyncIterator[tuple[str, bytes]]]
+    ):
+        ...
+
+    def hscan(
+        self,
+        key: str,
+        *,
+        match: str | None = None,
+        count: int | None,
+        decode: bool = True,
+    ) -> (
+        AbstractAsyncContextManager[AsyncIterator[tuple[str, str]]]
+        | AbstractAsyncContextManager[AsyncIterator[tuple[str, bytes]]]
+    ):
+        """
+        Iterate over the fields in the given hash map.
+
+        :param key: the hash map
+        :param match: glob-style pattern to use for matching field names
+        :param count: maximum number of items to fetch on each iteration
+        :param decode: ``True`` to decode byte strings in field values to strings,
+            ``False`` to leave them as is
+        :return: an async context manager yielding an async iterator yielding tuples of
+            (field name, field value)
+
+        Usage::
+
+            async with client.hscan("hashmapname", match="patter*") as iterator:
+                async for field, value in iterator:
+                    print(f"Found field: {field} = {value}")
+
+        .. seealso::
+            `Official manual page for HSCAN <https://redis.io/commands/hscan/>`_
+        """
+
+        @dataclass
+        class FieldIterator(Generic[AnyStr]):
+            _pool: RedisConnectionPool
+            _exit_stack: AsyncExitStack = field(init=False)
+            _conn: RedisConnection = field(init=False)
+            _cursor: bytes = field(init=False)
+            _buffer: deque[tuple[str, AnyStr]] = field(
+                init=False, default_factory=deque
+            )
+
+            async def __aenter__(self) -> Self:
+                async with AsyncExitStack() as exit_stack:
+                    self._conn = await exit_stack.enter_async_context(
+                        self._pool.acquire()
+                    )
+                    self._exit_stack = exit_stack.pop_all()
+
+                return self
+
+            async def __aexit__(
+                self,
+                exc_type: type[BaseException] | None,
+                exc_val: BaseException | None,
+                exc_tb: TracebackType | None,
+            ) -> None:
+                await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
+
+            def __aiter__(self) -> Self:
+                return self
+
+            async def __anext__(self) -> tuple[str, AnyStr]:
+                if not self._buffer:
+                    if cursor := getattr(self, "_cursor", None) == b"0":
+                        raise StopAsyncIteration
+
+                    retval = await self._conn.execute_command(
+                        "HSCAN", key, cursor or b"0", *args, decode=False
+                    )
+                    assert isinstance(retval, list) and len(retval) == 2
+                    self._cursor = cast(bytes, retval[0])
+                    items = retval[1]
+                    assert isinstance(items, list)
+                    fields = [as_string(f) for f in items[::2]]
+                    values: list[Any] = (
+                        [as_string(v) for v in items[1::2]] if decode else items[1::2]
+                    )
+                    for field_, value in zip(fields, values):
+                        self._buffer.append((field_, value))
+
+                return self._buffer.popleft()
+
+        args: list[object] = []
+        if match is not None:
+            args.extend(["MATCH", match])
+        if count is not None:
+            args.extend(["COUNT", count])
+
+        return (
+            FieldIterator[str](self._pool)
+            if decode
+            else FieldIterator[bytes](self._pool)
+        )
+
+    async def hset(self, key: str, values: Mapping[str, object]) -> int:
         """
         Set the specified field values in the given hash map.
 
