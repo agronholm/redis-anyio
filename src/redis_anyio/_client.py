@@ -28,7 +28,13 @@ from ._lock import RedisLock
 from ._pipeline import RedisPipeline, RedisTransaction
 from ._subscription import Subscription
 from ._types import ResponseValue
-from ._utils import as_string
+from ._utils import (
+    as_milliseconds,
+    as_seconds,
+    as_string,
+    as_unix_timestamp,
+    as_unix_timestamp_ms,
+)
 
 if sys.version_info >= (3, 11):
     from typing import Self
@@ -261,15 +267,15 @@ class RedisClient:
     async def set(
         self,
         key: str,
-        value: str | bytes,
+        value: object,
         *,
         nx: bool = False,
         xx: bool = False,
         get: bool = False,
-        ex: int | None = None,
-        px: int | None = None,
-        exat: int | None = None,
-        pxat: int | None = None,
+        ex: int | timedelta | None = None,
+        px: int | timedelta | None = None,
+        exat: int | datetime | None = None,
+        pxat: int | datetime | None = None,
         keepttl: bool = False,
         decode: Literal[True] = ...,
     ) -> str | None:
@@ -279,15 +285,15 @@ class RedisClient:
     async def set(
         self,
         key: str,
-        value: str | bytes,
+        value: object,
         *,
         nx: bool = False,
         xx: bool = False,
         get: bool = False,
-        ex: int | None = None,
-        px: int | None = None,
-        exat: int | None = None,
-        pxat: int | None = None,
+        ex: int | timedelta | None = None,
+        px: int | timedelta | None = None,
+        exat: int | datetime | None = None,
+        pxat: int | datetime | None = None,
         keepttl: bool = False,
         decode: Literal[False],
     ) -> bytes | None:
@@ -297,15 +303,15 @@ class RedisClient:
     async def set(
         self,
         key: str,
-        value: str | bytes,
+        value: object,
         *,
         nx: bool = False,
         xx: bool = False,
         get: bool = False,
-        ex: int | None = None,
-        px: int | None = None,
-        exat: int | None = None,
-        pxat: int | None = None,
+        ex: int | timedelta | None = None,
+        px: int | timedelta | None = None,
+        exat: int | datetime | None = None,
+        pxat: int | datetime | None = None,
         keepttl: bool = False,
         decode: bool,
     ) -> str | bytes | None:
@@ -314,15 +320,15 @@ class RedisClient:
     async def set(
         self,
         key: str,
-        value: str | bytes,
+        value: object,
         *,
         nx: bool = False,
         xx: bool = False,
         get: bool = False,
-        ex: int | None = None,
-        px: int | None = None,
-        exat: int | None = None,
-        pxat: int | None = None,
+        ex: int | timedelta | None = None,
+        px: int | timedelta | None = None,
+        exat: int | datetime | None = None,
+        pxat: int | datetime | None = None,
         keepttl: bool = False,
         decode: bool = True,
     ) -> str | bytes | None:
@@ -362,13 +368,13 @@ class RedisClient:
             extra_args.append("GET")
 
         if ex is not None:
-            extra_args.extend(["EX", ex])
+            extra_args.extend(["EX", as_seconds(ex)])
         elif px is not None:
-            extra_args.extend(["PX", px])
+            extra_args.extend(["PX", as_milliseconds(px)])
         elif exat is not None:
-            extra_args.extend(["PXAT", exat])
+            extra_args.extend(["EXAT", as_unix_timestamp(exat)])
         elif pxat is not None:
-            extra_args.extend(["PXAT", pxat])
+            extra_args.extend(["PXAT", as_unix_timestamp_ms(pxat)])
 
         if keepttl:
             extra_args.append("KEEPTTL")
@@ -418,6 +424,23 @@ class RedisClient:
 
         """
         await self.execute_command("MSET", *chain.from_iterable(values.items()))
+
+    async def expiretime(self, key: str) -> int:
+        """
+        Return the expiration time of the given key as a UNIX timestamp (in seconds).
+
+        :return: the expiration time as an UNIX timestamp (in seconds), or -1 if
+            the key exists but has no associated expiration time, or -2 if the key
+            doesn't exist
+
+        .. seealso::
+            `Official manual page for EXPIRETIME
+            <https://redis.io/commands/expiretime/>`_
+
+        """
+        retval = await self.execute_command("EXPIRETIME", key)
+        assert isinstance(retval, int)
+        return retval
 
     async def pexpire(
         self,
@@ -484,7 +507,7 @@ class RedisClient:
             doesn't exist
 
         .. seealso::
-            `Official manual page for EXPIRETIME
+            `Official manual page for PEXPIRETIME
             <https://redis.io/commands/pexpiretime/>`_
 
         """

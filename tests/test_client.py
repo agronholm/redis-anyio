@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import cast
 
 import pytest
@@ -8,10 +8,13 @@ from _pytest.fixtures import SubRequest
 from anyio import create_task_group, fail_after, sleep
 from anyio.abc import TaskStatus
 
-from redis_anyio import RedisClient, ResponseError
-from redis_anyio._subscription import Message
+from redis_anyio import Message, RedisClient, ResponseError
 
 pytestmark = pytest.mark.anyio
+
+FAR_FUTURE_DATE = datetime(2200, 9, 5, 12, 40, 8, tzinfo=timezone.utc)
+FAR_FUTURE_DATE_UNIXTS = 7279504808
+FAR_FUTURE_DATE_UNIXTS_MS = 7279504808000
 
 
 @pytest.fixture(
@@ -56,6 +59,82 @@ class TestBasicKeyOperations:
             assert await client.get("foo") == "bar" if decode else b"bar"
             await client.delete("foo")
             assert await client.get("foo") is None
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(5, id="int"),
+            pytest.param(timedelta(seconds=5), id="timedelta"),
+        ],
+    )
+    async def test_set_ex(
+        self,
+        redis_port: int,
+        decode: bool,
+        value: int | timedelta,
+    ) -> None:
+        async with RedisClient(port=redis_port) as client:
+            await client.delete("foo")
+            await client.set("foo", "bar", ex=value)
+            ttl = await client.pttl("foo")
+            assert 4500 < ttl <= 5000
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(5000, id="int"),
+            pytest.param(timedelta(seconds=5), id="timedelta"),
+        ],
+    )
+    async def test_set_px(
+        self,
+        redis_port: int,
+        decode: bool,
+        value: int | timedelta,
+    ) -> None:
+        async with RedisClient(port=redis_port) as client:
+            await client.delete("foo")
+            await client.set("foo", "bar", px=value)
+            ttl = await client.pttl("foo")
+            assert 4500 < ttl <= 5000
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(FAR_FUTURE_DATE_UNIXTS, id="int"),
+            pytest.param(FAR_FUTURE_DATE, id="datetime"),
+        ],
+    )
+    async def test_set_exat(
+        self,
+        redis7_port: int,
+        decode: bool,
+        value: int | datetime,
+    ) -> None:
+        async with RedisClient(port=redis7_port) as client:
+            await client.delete("foo")
+            await client.set("foo", "bar", exat=value)
+            expire_time = await client.expiretime("foo")
+            assert expire_time == FAR_FUTURE_DATE_UNIXTS
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(FAR_FUTURE_DATE_UNIXTS_MS, id="int"),
+            pytest.param(FAR_FUTURE_DATE, id="datetime"),
+        ],
+    )
+    async def test_set_pxat(
+        self,
+        redis7_port: int,
+        decode: bool,
+        value: int | datetime,
+    ) -> None:
+        async with RedisClient(port=redis7_port) as client:
+            await client.delete("foo")
+            await client.set("foo", "bar", pxat=value)
+            expire_time = await client.pexpiretime("foo")
+            assert expire_time == FAR_FUTURE_DATE_UNIXTS_MS
 
     async def test_mget_mset(self, redis_port: int, decode: bool) -> None:
         async with RedisClient(port=redis_port) as client:
