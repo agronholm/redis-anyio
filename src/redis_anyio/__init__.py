@@ -8,6 +8,9 @@ from ._lock import RedisLock as RedisLock
 from ._pipeline import RedisPipeline as RedisPipeline
 from ._pipeline import RedisTransaction as RedisTransaction
 from ._resp3 import VerbatimString as VerbatimString
+from ._subscription import CONNECTION_STATE_CHANNEL as CONNECTION_STATE_CHANNEL
+from ._subscription import DISCONNECTED as DISCONNECTED
+from ._subscription import RECONNECTED as RECONNECTED
 from ._subscription import Message as Message
 from ._subscription import Subscription as Subscription
 from ._types import ResponseValue as ResponseValue

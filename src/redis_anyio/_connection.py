@@ -15,18 +15,24 @@ from types import TracebackType
 from typing import Any
 
 from anyio import (
+    BrokenResourceError,
     ClosedResourceError,
+    EndOfStream,
     Semaphore,
     aclose_forcefully,
     connect_tcp,
     create_memory_object_stream,
     create_task_group,
     fail_after,
+    sleep,
 )
 from anyio.abc import AnyByteSendStream, AnyByteStream, TaskGroup, TaskStatus
 from anyio.streams.memory import MemoryObjectReceiveStream
+from tenacity import AsyncRetrying, retry_if_exception_type
+from tenacity.stop import stop_base
+from tenacity.wait import wait_base
 
-from ._exceptions import ResponseError
+from ._exceptions import ConnectivityError, ResponseError
 from ._resp3 import (
     RESP3Attributes,
     RESP3BlobError,
@@ -87,6 +93,15 @@ class RedisConnection:
         pass  # Drop attributes on the floor for now
 
     async def aclose(self, *, force: bool = True) -> None:
+        all_subscriptions = {
+            sub
+            for subs_dict in self._subscriptions.values()
+            for subs in subs_dict.values()
+            for sub in subs
+        }
+        for subscription in all_subscriptions:
+            await subscription.aclose()
+
         if force:
             await aclose_forcefully(self._send_stream)
         else:
@@ -97,31 +112,37 @@ class RedisConnection:
         async with stream, send:
             self._send_stream = stream
             task_status.started()
-            try:
-                async for data in stream:
-                    logger.debug("Received data from server: %r", data)
-                    self._parser.feed_bytes(data)
-                    for item in self._parser:
-                        if isinstance(item, RESP3PushData):
-                            if item.type in PUBSUB_REPLIES:
-                                await send.send(None)
-                            else:
-                                await self._handle_push_data(item)
-                        elif isinstance(item, RESP3Attributes):
-                            await self._handle_attribute(item)
-                        elif isinstance(item, RESP3SimpleError):
-                            await send.send(ResponseError(item.code, item.message))
-                        elif isinstance(item, RESP3BlobError):
-                            await send.send(
-                                ResponseError(
-                                    item.code.decode("utf-8", errors="replace"),
-                                    item.message.decode("utf-8", errors="replace"),
-                                )
-                            )
+            while True:
+                try:
+                    data = await stream.receive()
+                except ClosedResourceError:
+                    await self.aclose()
+                    return
+                except (EndOfStream, BrokenResourceError):
+                    await self.aclose(force=True)
+                    return
+
+                logger.debug("Received data from server: %r", data)
+                self._parser.feed_bytes(data)
+                for item in self._parser:
+                    if isinstance(item, RESP3PushData):
+                        if item.type in PUBSUB_REPLIES:
+                            await send.send(None)
                         else:
-                            await send.send(item)
-            except ClosedResourceError:
-                pass
+                            await self._handle_push_data(item)
+                    elif isinstance(item, RESP3Attributes):
+                        await self._handle_attribute(item)
+                    elif isinstance(item, RESP3SimpleError):
+                        await send.send(ResponseError(item.code, item.message))
+                    elif isinstance(item, RESP3BlobError):
+                        await send.send(
+                            ResponseError(
+                                item.code.decode("utf-8", errors="replace"),
+                                item.message.decode("utf-8", errors="replace"),
+                            )
+                        )
+                    else:
+                        await send.send(item)
 
     async def validate(self) -> bool:
         nonce = str(random.randint(0, 100000))
@@ -141,7 +162,11 @@ class RedisConnection:
         self, *, decode: bool
     ) -> ResponseValue | ResponseError:
         with fail_after(self.timeout):
-            response = await self._response_stream.receive()
+            try:
+                response = await self._response_stream.receive()
+            except EndOfStream:
+                raise ConnectivityError from None
+
             if decode and not isinstance(response, ResponseError):
                 response = decode_response_value(response)
 
@@ -221,9 +246,11 @@ class RedisConnectionPoolStatistics:
 
 @dataclass
 class RedisConnectionPool:
-    host: str = "localhost"
-    port: int = 6379
-    db: int = 0
+    host: str
+    port: int
+    db: int
+    retry_wait: wait_base
+    retry_stop: stop_base
     timeout: float = 10
     connect_timeout: float = 10
     username: str | None = None
@@ -252,6 +279,15 @@ class RedisConnectionPool:
         self._connections_task_group.cancel_scope.cancel()
         await self._connections_task_group.__aexit__(exc_type, exc_val, exc_tb)
         self._idle_connections.clear()
+
+    def _retry(self, *exceptions: type[Exception]) -> AsyncRetrying:
+        return AsyncRetrying(
+            wait=self.retry_wait,
+            stop=self.retry_stop,
+            sleep=sleep,
+            reraise=True,
+            retry=retry_if_exception_type(exceptions),
+        )
 
     def statistics(self) -> RedisConnectionPoolStatistics:
         """Return statistics about the max/busy/idle connections in this pool."""
@@ -289,37 +325,41 @@ class RedisConnectionPool:
 
     async def _add_connection(self) -> RedisConnection:
         # Connect to the Redis server
-        with fail_after(self.connect_timeout):
-            if self.ssl_context:
-                stream: AnyByteStream = await connect_tcp(
-                    self.host, self.port, ssl_context=self.ssl_context
-                )
-            else:
-                stream = await connect_tcp(self.host, self.port)
+        async for attempt in self._retry(
+            OSError, ConnectivityError, ClosedResourceError, TimeoutError
+        ):
+            with attempt:
+                with fail_after(self.connect_timeout):
+                    if self.ssl_context:
+                        stream: AnyByteStream = await connect_tcp(
+                            self.host, self.port, ssl_context=self.ssl_context
+                        )
+                    else:
+                        stream = await connect_tcp(self.host, self.port)
 
-        try:
-            conn = RedisConnection(self.timeout)
-            await self._connections_task_group.start(conn.run, stream)
+                try:
+                    conn = RedisConnection(self.timeout)
+                    await self._connections_task_group.start(conn.run, stream)
 
-            # Assemble authentication arguments for the HELLO command
-            if self.username is not None and self.password is not None:
-                auth_args: tuple[str, str, str] | tuple[()] = (
-                    "AUTH",
-                    self.username,
-                    self.password,
-                )
-            else:
-                auth_args = ()
+                    # Assemble authentication arguments for the HELLO command
+                    if self.username is not None and self.password is not None:
+                        auth_args: tuple[str, str, str] | tuple[()] = (
+                            "AUTH",
+                            self.username,
+                            self.password,
+                        )
+                    else:
+                        auth_args = ()
 
-            # Switch to the RESP3 protocol
-            await conn.execute_command("HELLO", "3", *auth_args)
+                    # Switch to the RESP3 protocol
+                    await conn.execute_command("HELLO", "3", *auth_args)
 
-            # Switch to the selected database, if it's not the default of 0
-            if self.db:
-                await conn.execute_command("SELECT", self.db)
-        except BaseException:
-            # Force close the connection
-            await aclose_forcefully(stream)
-            raise
+                    # Switch to the selected database, if it's not the default of 0
+                    if self.db:
+                        await conn.execute_command("SELECT", self.db)
+                except BaseException:
+                    # Force close the connection
+                    await aclose_forcefully(stream)
+                    raise
 
         return conn

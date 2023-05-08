@@ -7,16 +7,19 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from itertools import chain
 from types import TracebackType
-from typing import TYPE_CHECKING, Literal, cast, overload
+from typing import Literal, cast, overload
 
-from anyio import sleep
-from tenacity import AsyncRetrying, retry_if_exception_type
+from tenacity import (
+    stop_never,
+    wait_exponential,
+)
+from tenacity.stop import stop_base
+from tenacity.wait import wait_base
 
 from ._connection import (
     RedisConnectionPool,
     RedisConnectionPoolStatistics,
 )
-from ._exceptions import ConnectivityError
 from ._lock import RedisLock
 from ._pipeline import RedisPipeline, RedisTransaction
 from ._subscription import Subscription
@@ -28,13 +31,29 @@ if sys.version_info >= (3, 11):
 else:
     from typing_extensions import Self
 
-if TYPE_CHECKING:
-    pass
-
 
 class RedisClient:
-    def __init__(self, host: str = "localhost", port: int = 6379, *, db: int = 0):
-        self._pool = RedisConnectionPool(host=host, port=port, db=db)
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 6379,
+        *,
+        db: int = 0,
+        retry_wait: wait_base = wait_exponential(max=5),
+        retry_stop: stop_base = stop_never,
+    ):
+        """
+        :param host: the host name of the Redis server
+        :param port: the port number of the Redis server
+        :param db: the database number to select
+        :param retry_wait: specifies how to wait before the next retry on a connection
+            failure
+        :param retry_stop: specifies when to stop retrying
+
+        """
+        self._pool = RedisConnectionPool(
+            host=host, port=port, db=db, retry_wait=retry_wait, retry_stop=retry_stop
+        )
 
     async def __aenter__(self) -> Self:
         await self._pool.__aenter__()
@@ -71,15 +90,8 @@ class RedisClient:
         :raises ResponseError: if the server returns an error response
 
         """
-        async for attempt in AsyncRetrying(
-            sleep=sleep,
-            retry=retry_if_exception_type(ConnectivityError),
-        ):
-            with attempt:
-                async with self._pool.acquire() as conn:
-                    return await conn.execute_command(command, *args, decode=decode)
-
-        raise AssertionError("Execution should never get to this point")
+        async with self._pool.acquire() as conn:
+            return await conn.execute_command(command, *args, decode=decode)
 
     def lock(
         self,
@@ -1161,7 +1173,7 @@ class RedisClient:
         Delete a field in the given hash map.
 
         :param key: the hash map
-        :param field: the fields to delete
+        :param field: the field to delete
         :return: 1 if the hash map contained the given field, or 0 if either the field
             or the hash map did not exist
 
@@ -1172,6 +1184,21 @@ class RedisClient:
         retval = await self.execute_command("HDEL", key, field)
         assert isinstance(retval, int)
         return retval
+
+    async def hexists(self, key: str, field: str) -> bool:
+        """
+        Check if the given field exists in the given hash map.
+
+        :param key: the hash map
+        :param field: the field to check
+        :return: ``True`` if the hash map contains the given field, ``False`` if not
+
+        .. seealso::
+            `Official manual page for HEXISTS <https://redis.io/commands/hexists/>`_
+
+        """
+        retval = await self.execute_command("HEXISTS", key, field)
+        return bool(retval)
 
     @overload
     async def hget(
@@ -1459,26 +1486,40 @@ class RedisClient:
 
     @overload
     def subscribe(
-        self, *channels: str, decode: Literal[True] = ...
+        self,
+        *channels: str,
+        send_connection_state_changes: bool = ...,
+        decode: Literal[True] = ...,
     ) -> Subscription[str]:
         ...
 
     @overload
-    def subscribe(self, *channels: str, decode: Literal[False]) -> Subscription[bytes]:
+    def subscribe(
+        self,
+        *channels: str,
+        send_connection_state_changes: bool = ...,
+        decode: Literal[False],
+    ) -> Subscription[bytes]:
         ...
 
     @overload
     def subscribe(
-        self, *channels: str, decode: bool
+        self, *channels: str, send_connection_state_changes: bool = ..., decode: bool
     ) -> Subscription[str] | Subscription[bytes]:
         ...
 
     def subscribe(
-        self, *channels: str, decode: bool = True
+        self,
+        *channels: str,
+        send_connection_state_changes: bool = False,
+        decode: bool = True,
     ) -> Subscription[str] | Subscription[bytes]:
         """
         Subscribe to one or more channels.
 
+        :param send_connection_state_changes: if ``True``, send messages about
+            disconnects and reconnections in a specially named topic within the stream
+            (see the publish/subscribe section of the documentation for further info)
         :param decode: if ``True``, decode the messages into strings using the
             UTF-8 encoding. If ``False``, yield raw bytes instead.
 
@@ -1497,6 +1538,7 @@ class RedisClient:
             channels,
             "subscribe",
             "message",
+            send_connection_state_changes,
             decode,
             "SUBSCRIBE",
             "UNSUBSCRIBE",
@@ -1505,28 +1547,43 @@ class RedisClient:
 
     @overload
     def ssubscribe(
-        self, *shardchannels: str, decode: Literal[True] = ...
+        self,
+        *shardchannels: str,
+        send_connection_state_changes: bool = ...,
+        decode: Literal[True] = ...,
     ) -> Subscription[str]:
         ...
 
     @overload
     def ssubscribe(
-        self, *shardchannels: str, decode: Literal[False]
+        self,
+        *shardchannels: str,
+        send_connection_state_changes: bool = ...,
+        decode: Literal[False],
     ) -> Subscription[bytes]:
         ...
 
     @overload
     def ssubscribe(
-        self, *shardchannels: str, decode: bool
+        self,
+        *shardchannels: str,
+        send_connection_state_changes: bool = ...,
+        decode: bool,
     ) -> Subscription[str] | Subscription[bytes]:
         ...
 
     def ssubscribe(
-        self, *shardchannels: str, decode: bool = True
+        self,
+        *shardchannels: str,
+        send_connection_state_changes: bool = False,
+        decode: bool = True,
     ) -> Subscription[str] | Subscription[bytes]:
         """
         Subscribe to one or more shard channels.
 
+        :param send_connection_state_changes: if ``True``, send messages about
+            disconnects and reconnections in a specially named topic within the stream
+            (see the publish/subscribe section of the documentation for further info)
         :param decode: if ``True``, decode the messages into strings using the
             UTF-8 encoding. If ``False``, yield raw bytes instead.
 
@@ -1546,6 +1603,7 @@ class RedisClient:
             shardchannels,
             "ssubscribe",
             "smessage",
+            send_connection_state_changes,
             decode,
             "SSUBSCRIBE",
             "SUNSUBSCRIBE",
@@ -1554,26 +1612,40 @@ class RedisClient:
 
     @overload
     def psubscribe(
-        self, *patterns: str, decode: Literal[True] = ...
+        self,
+        *patterns: str,
+        send_connection_state_changes: bool = ...,
+        decode: Literal[True] = ...,
     ) -> Subscription[str]:
         ...
 
     @overload
-    def psubscribe(self, *patterns: str, decode: Literal[False]) -> Subscription[bytes]:
+    def psubscribe(
+        self,
+        *patterns: str,
+        send_connection_state_changes: bool = ...,
+        decode: Literal[False],
+    ) -> Subscription[bytes]:
         ...
 
     @overload
     def psubscribe(
-        self, *patterns: str, decode: bool
+        self, *patterns: str, send_connection_state_changes: bool = ..., decode: bool
     ) -> Subscription[str] | Subscription[bytes]:
         ...
 
     def psubscribe(
-        self, *patterns: str, decode: bool = True
+        self,
+        *patterns: str,
+        send_connection_state_changes: bool = False,
+        decode: bool = True,
     ) -> Subscription[str] | Subscription[bytes]:
         """
         Subscribe to one or more topic patterns.
 
+        :param send_connection_state_changes: if ``True``, send messages about
+            disconnects and reconnections in a specially named topic within the stream
+            (see the publish/subscribe section of the documentation for further info)
         :param decode: if ``True``, decode the messages into strings using the
             UTF-8 encoding. If ``False``, yield raw bytes instead.
 
@@ -1593,6 +1665,7 @@ class RedisClient:
             patterns,
             "psubscribe",
             "pmessage",
+            send_connection_state_changes,
             decode,
             "PSUBSCRIBE",
             "PUNSUBSCRIBE",

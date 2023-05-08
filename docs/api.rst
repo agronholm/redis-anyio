@@ -25,6 +25,15 @@ Types
 
 .. autoclass:: RedisLock
 
+Constants
+=========
+
+.. autodata:: CONNECTION_STATE_CHANNEL
+
+.. autodata:: DISCONNECTED
+
+.. autodata:: RECONNECTED
+
 Exceptions
 ==========
 
