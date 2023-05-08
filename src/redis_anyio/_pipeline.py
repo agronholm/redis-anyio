@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from itertools import chain
 from typing import Literal
 
 from ._connection import RedisConnectionPool
 from ._exceptions import ResponseError
 from ._types import ResponseValue
+from ._utils import as_milliseconds, as_seconds, as_unix_timestamp, as_unix_timestamp_ms
 
 
 @dataclass(frozen=True)
@@ -66,10 +67,10 @@ class RedisPipeline:
         nx: bool = False,
         xx: bool = False,
         get: bool = False,
-        ex: int | None = None,
-        px: int | None = None,
-        exat: int | None = None,
-        pxat: int | None = None,
+        ex: int | timedelta | None = None,
+        px: int | timedelta | None = None,
+        exat: int | datetime | None = None,
+        pxat: int | datetime | None = None,
         keepttl: bool = False,
         decode: bool = True,
     ) -> None:
@@ -89,13 +90,13 @@ class RedisPipeline:
             extra_args.append("GET")
 
         if ex is not None:
-            extra_args.extend(["EX", ex])
+            extra_args.extend(["EX", as_seconds(ex)])
         elif px is not None:
-            extra_args.extend(["PX", px])
+            extra_args.extend(["PX", as_milliseconds(px)])
         elif exat is not None:
-            extra_args.extend(["PXAT", exat])
+            extra_args.extend(["PXAT", as_unix_timestamp(exat)])
         elif pxat is not None:
-            extra_args.extend(["PXAT", pxat])
+            extra_args.extend(["PXAT", as_unix_timestamp_ms(pxat)])
 
         if keepttl:
             extra_args.append("KEEPTTL")
