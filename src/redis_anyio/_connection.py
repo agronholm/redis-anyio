@@ -249,14 +249,14 @@ class RedisConnectionPool:
     host: str
     port: int
     db: int
+    ssl_context: SSLContext | None
+    username: str | None
+    password: str | None
+    max_connections: int
+    timeout: float
+    connect_timeout: float
     retry_wait: wait_base
     retry_stop: stop_base
-    timeout: float = 10
-    connect_timeout: float = 10
-    username: str | None = None
-    password: str | None = None
-    ssl_context: SSLContext | None = None
-    capacity: int = 2**16 - 1  # TCP port numbers are 16 bit unsigned ints
     _closed: bool = field(init=False, default=False)
     _idle_connections: deque[RedisConnection] = field(init=False, default_factory=deque)
     _capacity_semaphore: Semaphore = field(init=False)
@@ -264,7 +264,9 @@ class RedisConnectionPool:
     _connections_task_group: TaskGroup = field(init=False)
 
     async def __aenter__(self) -> Self:
-        self._capacity_semaphore = Semaphore(self.capacity, max_value=self.capacity)
+        self._capacity_semaphore = Semaphore(
+            self.max_connections, max_value=self.max_connections
+        )
         self._connections_task_group = create_task_group()
         await self._connections_task_group.__aenter__()
         return self
@@ -291,10 +293,10 @@ class RedisConnectionPool:
 
     def statistics(self) -> RedisConnectionPoolStatistics:
         """Return statistics about the max/busy/idle connections in this pool."""
-        acquired_connections = self.capacity - self._capacity_semaphore.value
+        acquired_connections = self.max_connections - self._capacity_semaphore.value
         idle_connections = len(self._idle_connections)
         return RedisConnectionPoolStatistics(
-            max_connections=self.capacity,
+            max_connections=self.max_connections,
             total_connections=acquired_connections + idle_connections,
             idle_connections=idle_connections,
             busy_connections=acquired_connections,

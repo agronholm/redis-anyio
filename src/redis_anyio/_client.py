@@ -8,6 +8,7 @@ from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontext
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from itertools import chain
+from ssl import Purpose, SSLContext, create_default_context
 from types import TracebackType
 from typing import Any, AnyStr, Generic, Literal, cast, overload
 
@@ -36,12 +37,20 @@ else:
 
 
 class RedisClient:
+    """ """
+
     def __init__(
         self,
         host: str = "localhost",
         port: int = 6379,
         *,
         db: int = 0,
+        ssl: bool | SSLContext = False,
+        username: str | None = None,
+        password: str | None = None,
+        max_connections: int = 2**16 - 1,  # TCP port numbers are 16 bit unsigned ints
+        timeout: float = 30,
+        connect_timeout: float = 10,
         retry_wait: wait_base = wait_exponential(max=5),
         retry_stop: stop_base = stop_never,
     ):
@@ -49,13 +58,37 @@ class RedisClient:
         :param host: the host name of the Redis server
         :param port: the port number of the Redis server
         :param db: the database number to select
+        :param ssl: ``True`` to use a default SSL context to connect to the server,
+            or a custom SSL context to use to make an SSL connection; ``False`` to not
+            use SSL at all
+        :param username: user name to authenticate with
+        :param password: password to authenticate with
+        :param max_connections: the maximum number of concurrnet connections to the
+            server this client is allowed to keep open
+        :param timeout: timeout (in seconds) for read/write operations
+        :param connect_timeout: time (in seconds) to wait for a connect operation to
+            succeed
         :param retry_wait: specifies how to wait before the next retry on a connection
             failure
         :param retry_stop: specifies when to stop retrying
 
         """
+        ssl_context: SSLContext | None = None
+        if ssl is True:
+            ssl_context = create_default_context(Purpose.SERVER_AUTH)
+
         self._pool = RedisConnectionPool(
-            host=host, port=port, db=db, retry_wait=retry_wait, retry_stop=retry_stop
+            host=host,
+            port=port,
+            db=db,
+            ssl_context=ssl_context,
+            username=username,
+            password=password,
+            max_connections=max_connections,
+            timeout=timeout,
+            connect_timeout=connect_timeout,
+            retry_wait=retry_wait,
+            retry_stop=retry_stop,
         )
 
     async def __aenter__(self) -> Self:
