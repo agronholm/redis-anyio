@@ -1120,40 +1120,71 @@ class RedisClient:
 
     @overload
     async def rpop(
-        self, key: str, count: int = 1, *, decode: Literal[True] = ...
-    ) -> list[str]:
+        self, key: str, count: None = ..., *, decode: Literal[True] = ...
+    ) -> str | None:
         ...
 
     @overload
     async def rpop(
-        self, key: str, count: int = 1, *, decode: Literal[False]
-    ) -> list[bytes]:
+        self, key: str, count: None = ..., *, decode: Literal[False]
+    ) -> bytes | None:
         ...
 
     @overload
     async def rpop(
-        self, key: str, count: int = 1, *, decode: bool
-    ) -> list[str] | list[bytes]:
+        self, key: str, count: None = ..., *, decode: bool
+    ) -> str | bytes | None:
+        ...
+
+    @overload
+    async def rpop(
+        self, key: str, count: int, *, decode: Literal[True] = ...
+    ) -> list[str] | None:
+        ...
+
+    @overload
+    async def rpop(
+        self, key: str, count: int, *, decode: Literal[False]
+    ) -> list[bytes] | None:
+        ...
+
+    @overload
+    async def rpop(
+        self, key: str, count: int, *, decode: bool
+    ) -> list[str] | list[bytes] | None:
         ...
 
     async def rpop(
-        self, key: str, count: int = 1, *, decode: bool = True
-    ) -> list[str] | list[bytes]:
+        self, key: str, count: int | None = None, *, decode: bool = True
+    ) -> str | bytes | list[str] | list[bytes] | None:
         """
-        Remove and return the last element(s) value of a key.
+        Remove and return the last element(s) from a list.
 
-        :param key: the array to pop elements from
-        :param count: the number of elements to pop
+        :param key: the list to remove elements from
+        :param count: the number of elements to remove (omit to return the last
+            element)
         :param decode: ``True`` to decode byte strings in the response to strings,
             ``False`` to leave them as is
-        :return: the list of popped elements
+        :return:
+            * a list of removed elements (if ``count`` was specified)
+            * the removed element (if ``count`` was omitted)
+            * ``None`` when no element could be popped.
 
         .. seealso:: `Official manual page for RPOP <https://redis.io/commands/rpop/>`_
 
         """
-        retval = await self.execute_command("RPOP", key, count, decode=decode)
-        assert isinstance(retval, list)
-        return cast("list[str] | list[bytes]", retval)
+        args: list[object] = []
+        if count is not None:
+            args.append(count)
+
+        retval = await self.execute_command("RPOP", key, *args, decode=decode)
+        if retval is None:
+            return None
+
+        if isinstance(retval, list):
+            return cast("list[str] | list[bytes]", retval)
+
+        return cast("str | bytes", retval)
 
     async def rpush(self, key: str, *values: object) -> int:
         """
