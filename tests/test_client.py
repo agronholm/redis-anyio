@@ -207,16 +207,31 @@ class TestListOperations:
             else:
                 assert result == ("dummy", [b"value1", b"value2"])
 
-    async def test_lpop(self, redis_port: int, decode: bool) -> None:
+    async def test_lpop_single(self, redis_port: int, decode: bool) -> None:
         async with RedisClient(port=redis_port) as client:
             await client.delete("dummy")
             assert await client.lpop("dummy") is None
-            assert await client.rpush("dummy", "value1", "value2", "value3")
+            assert await client.rpush("dummy", "value1")
+            result = await client.lpop("dummy", decode=decode)
+            if decode:
+                assert result == "value1"
+            else:
+                assert result == b"value1"
+
+            assert await client.lpop("dummy") is None
+
+    async def test_lpop_multi(self, redis_port: int, decode: bool) -> None:
+        async with RedisClient(port=redis_port) as client:
+            await client.delete("dummy")
+            assert await client.lpop("dummy") is None
+            assert await client.rpush("dummy", "value1", "value2")
             result = await client.lpop("dummy", count=2, decode=decode)
             if decode:
                 assert result == ["value1", "value2"]
             else:
                 assert result == [b"value1", b"value2"]
+
+            assert await client.lpop("dummy", count=1, decode=decode) is None
 
     async def test_rpush_llen(self, redis_port: int) -> None:
         async with RedisClient(port=redis_port) as client:

@@ -1052,44 +1052,71 @@ class RedisClient:
 
     @overload
     async def lpop(
-        self, key: str, count: int = 1, *, decode: Literal[True] = ...
+        self, key: str, count: None = ..., *, decode: Literal[True] = ...
+    ) -> str | None:
+        ...
+
+    @overload
+    async def lpop(
+        self, key: str, count: None = ..., *, decode: Literal[False]
+    ) -> bytes | None:
+        ...
+
+    @overload
+    async def lpop(
+        self, key: str, count: None = ..., *, decode: bool
+    ) -> str | bytes | None:
+        ...
+
+    @overload
+    async def lpop(
+        self, key: str, count: int, *, decode: Literal[True] = ...
     ) -> list[str] | None:
         ...
 
     @overload
     async def lpop(
-        self, key: str, count: int = 1, *, decode: Literal[False]
+        self, key: str, count: int, *, decode: Literal[False]
     ) -> list[bytes] | None:
         ...
 
     @overload
     async def lpop(
-        self, key: str, count: int = 1, *, decode: bool
+        self, key: str, count: int, *, decode: bool
     ) -> list[str] | list[bytes] | None:
         ...
 
     async def lpop(
-        self, key: str, count: int = 1, *, decode: bool = True
-    ) -> list[str] | list[bytes] | None:
+        self, key: str, count: int | None = None, *, decode: bool = True
+    ) -> str | bytes | list[str] | list[bytes] | None:
         """
         Remove and return the first element(s) from a list.
 
         :param key: the list to remove elements from
-        :param count: the number of elements to remove
+        :param count: the number of elements to remove (omit to return the first
+            element)
         :param decode: ``True`` to decode byte strings in the response to strings,
             ``False`` to leave them as is
-        :return: the list of removed elements, or ``None`` when no element could be
-            popped.
+        :return:
+            * a list of removed elements (if ``count`` was specified)
+            * the removed element (if ``count`` was omitted)
+            * ``None`` when no element could be popped.
 
         .. seealso:: `Official manual page for LPOP <https://redis.io/commands/lpop/>`_
 
         """
-        retval = await self.execute_command("LPOP", key, count, decode=decode)
+        args: list[object] = []
+        if count is not None:
+            args.append(count)
+
+        retval = await self.execute_command("LPOP", key, *args, decode=decode)
         if retval is None:
             return None
 
-        assert isinstance(retval, list)
-        return cast("list[str] | list[bytes]", retval)
+        if isinstance(retval, list):
+            return cast("list[str] | list[bytes]", retval)
+
+        return cast("str | bytes", retval)
 
     @overload
     async def rpop(
