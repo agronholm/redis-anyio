@@ -531,14 +531,18 @@ class RedisClient:
 
     @asynccontextmanager
     async def scan(
-        self, *, match: str | None = None, count: int | None, type_: str | None = None
+        self,
+        *,
+        match: str | None = None,
+        count: int | None = None,
+        type_: str | None = None,
     ) -> AsyncGenerator[AsyncIterator[str], None]:
         """
         Iterate over the set of keys in the current database.
 
-        :param str|None match: glob-style pattern to use for matching against keys
-        :param int|None count: maximum number of items to fetch on each iteration
-        :param str|None type_: type of keys to match
+        :param match: glob-style pattern to use for matching against keys
+        :param count: maximum number of items to fetch on each iteration
+        :param type_: type of keys to match
         :return: an async context manager yielding an async iterator yielding keys
 
         Usage::
