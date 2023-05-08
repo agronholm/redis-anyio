@@ -263,6 +263,21 @@ class RedisClient:
         assert isinstance(retval, (str, bytes)) or retval is None
         return retval
 
+    async def keys(self, pattern: str) -> list[str]:
+        """
+        Return the keys in the database matching the given pattern.
+
+        :param pattern: the pattern to match against
+        :return: the list of keys in the database that match the pattern
+
+        .. seealso::
+            `Official manual page for KEYS <https://redis.io/commands/keys/>`_
+
+        """
+        retval = await self.execute_command("KEYS", pattern)
+        assert isinstance(retval, list)
+        return cast("list[str]", retval)
+
     @overload
     async def set(
         self,

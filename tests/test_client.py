@@ -60,6 +60,14 @@ class TestBasicKeyOperations:
             await client.delete("foo")
             assert await client.get("foo") is None
 
+    async def test_keys(self, redis_port: int, decode: bool) -> None:
+        async with RedisClient(port=redis_port) as client:
+            await client.flushdb()
+            await client.set("foo1", "bar")
+            await client.set("foo2", "bar")
+            assert sorted(await client.keys("foo*")) == ["foo1", "foo2"]
+            assert await client.keys("*1") == ["foo1"]
+
     @pytest.mark.parametrize(
         "value",
         [
