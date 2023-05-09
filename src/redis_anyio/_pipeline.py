@@ -1,68 +1,167 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from itertools import chain
-from typing import Literal
+from typing import Any, Generic, Literal, TypeVar, overload
 
 from ._connection import RedisConnectionPool
 from ._exceptions import ResponseError
-from ._types import ResponseValue
 from ._utils import as_milliseconds, as_seconds, as_unix_timestamp, as_unix_timestamp_ms
 
+T = TypeVar("T")
 
-@dataclass(frozen=True)
-class QueuedCommand:
+
+@dataclass
+class QueuedCommand(Generic[T]):
+    """
+    Represents a command queued in a pipeline or transaction.
+
+    .. attribute:: result
+        The result of the command, once the pipeline or transaction has been executed.
+    """
+
     command: str
     args: tuple[object, ...]
     decode: bool
+    _result: T | ResponseError = field(init=False, repr=False)
+
+    def result(self) -> T:
+        if isinstance(self._result, ResponseError):
+            raise self._result
+
+        return self._result
 
 
 @dataclass(frozen=True, eq=False, repr=False)
 class RedisPipeline:
     pool: RedisConnectionPool
-    _queued_commands: list[QueuedCommand] = field(init=False, default_factory=list)
+    _queued_commands: list[QueuedCommand[Any]] = field(init=False, default_factory=list)
 
-    async def execute(self) -> Sequence[ResponseValue | ResponseError]:
-        """
-        Execute the commands queued thus far.
-
-        :return: a sequence of result values (or response errors) corresponding to the
-            number of queued commands
-
-        """
+    async def execute(self) -> None:
+        """Execute the commands queued thus far."""
         async with self.pool.acquire() as conn:
             for command in self._queued_commands:
                 await conn.send_command(command.command, *command.args)
 
-            return [
-                await conn.read_next_response(decode=command.decode)
-                for command in self._queued_commands
-            ]
+            for command in self._queued_commands:
+                command._result = await conn.read_next_response(decode=command.decode)
 
-    def queue_command(self, command: str, *args: object, decode: bool = True) -> None:
+    def queue_command(
+        self, command: str, *args: object, decode: bool = True
+    ) -> QueuedCommand[Any]:
         """
         Queue an arbitrary command to be executed.
 
         .. seealso:: :meth:`RedisClient.execute_command`
 
         """
-        self._queued_commands.append(QueuedCommand(command, args, decode))
+        cmd = QueuedCommand[Any](command, args, decode)
+        self._queued_commands.append(cmd)
+        return cmd
 
-    def get(self, key: str, *, decode: bool = True) -> None:
+    def delete(self, *keys: str) -> QueuedCommand[int]:
+        """
+        Queue a DELETE command.
+
+        .. seealso:: :meth:`RedisClient.delete`
+
+        """
+        return self.queue_command("DELETE", *keys)
+
+    @overload
+    def get(self, key: str, *, decode: Literal[True] = ...) -> QueuedCommand[str]:
+        ...
+
+    @overload
+    def get(self, key: str, *, decode: Literal[False]) -> QueuedCommand[bytes]:
+        ...
+
+    @overload
+    def get(
+        self, key: str, *, decode: bool
+    ) -> QueuedCommand[str] | QueuedCommand[bytes]:
+        ...
+
+    def get(
+        self, key: str, *, decode: bool = True
+    ) -> QueuedCommand[str] | QueuedCommand[bytes]:
         """
         Queue a GET command.
 
         .. seealso:: :meth:`RedisClient.set`
 
         """
-        self.queue_command("GET", key, decode=decode)
+        return self.queue_command("GET", key, decode=decode)
+
+    def keys(self, pattern: str) -> QueuedCommand[list[str]]:
+        """
+        Queue a KEYS command.
+
+        .. seealso:: :meth:`RedisClient.keys`
+
+        """
+        return self.queue_command("KEYS", pattern)
+
+    @overload
+    def set(
+        self,
+        key: str,
+        value: object,
+        *,
+        nx: bool = ...,
+        xx: bool = ...,
+        get: bool = ...,
+        ex: int | timedelta | None = ...,
+        px: int | timedelta | None = ...,
+        exat: int | datetime | None = ...,
+        pxat: int | datetime | None = ...,
+        keepttl: bool = ...,
+        decode: Literal[True] = ...,
+    ) -> QueuedCommand[str | None]:
+        ...
+
+    @overload
+    def set(
+        self,
+        key: str,
+        value: object,
+        *,
+        nx: bool = ...,
+        xx: bool = ...,
+        get: bool = ...,
+        ex: int | timedelta | None = ...,
+        px: int | timedelta | None = ...,
+        exat: int | datetime | None = ...,
+        pxat: int | datetime | None = ...,
+        keepttl: bool = ...,
+        decode: Literal[False],
+    ) -> QueuedCommand[bytes | None]:
+        ...
+
+    @overload
+    def set(
+        self,
+        key: str,
+        value: object,
+        *,
+        nx: bool = ...,
+        xx: bool = ...,
+        get: bool = ...,
+        ex: int | timedelta | None = ...,
+        px: int | timedelta | None = ...,
+        exat: int | datetime | None = ...,
+        pxat: int | datetime | None = ...,
+        keepttl: bool = ...,
+        decode: bool,
+    ) -> QueuedCommand[str | None] | QueuedCommand[bytes | None]:
+        ...
 
     def set(
         self,
         key: str,
-        value: str | bytes,
+        value: object,
         *,
         nx: bool = False,
         xx: bool = False,
@@ -73,7 +172,7 @@ class RedisPipeline:
         pxat: int | datetime | None = None,
         keepttl: bool = False,
         decode: bool = True,
-    ) -> None:
+    ) -> QueuedCommand[str | None] | QueuedCommand[bytes | None]:
         """
         Queue a SET command.
 
@@ -101,16 +200,38 @@ class RedisPipeline:
         if keepttl:
             extra_args.append("KEEPTTL")
 
-        self.queue_command("SET", key, value, *extra_args, decode=decode)
+        return self.queue_command("SET", key, value, *extra_args, decode=decode)
 
-    def hset(self, key: str, values: Mapping[str | bytes, object]) -> None:
+    def hset(
+        self, key: str, values: Mapping[str | bytes, object]
+    ) -> QueuedCommand[int]:
         """
         Queue an HSET command.
 
         .. seealso:: :meth:`RedisClient.hset`
 
         """
-        self.queue_command("HSET", key, *chain.from_iterable(values.items()))
+        return self.queue_command("HSET", key, *chain.from_iterable(values.items()))
+
+    def flushall(self, sync: bool = True) -> QueuedCommand[str]:
+        """
+        Queue an FLUSHALL command.
+
+        .. seealso:: :meth:`RedisClient.flushall`
+
+        """
+        mode = "SYNC" if sync else "ASYNC"
+        return self.queue_command("FLUSHALL", mode)
+
+    def flushdb(self, sync: bool = True) -> QueuedCommand[str]:
+        """
+        Queue an FLUSHDB command.
+
+        .. seealso:: :meth:`RedisClient.flushall`
+
+        """
+        mode = "SYNC" if sync else "ASYNC"
+        return self.queue_command("FLUSHDB", mode)
 
     def pexpire(
         self,
@@ -118,7 +239,7 @@ class RedisPipeline:
         milliseconds: int,
         *,
         how: Literal["nx", "xx", "gt", "lt"] | None = None,
-    ) -> None:
+    ) -> QueuedCommand[int]:
         """
         Queue a PEXPIRE command.
 
@@ -129,7 +250,7 @@ class RedisPipeline:
         if how is not None:
             extra_args.append(how.upper())
 
-        self.queue_command("PEXPIRE", key, milliseconds, *extra_args)
+        return self.queue_command("PEXPIRE", key, milliseconds, *extra_args)
 
     def pexpireat(
         self,
@@ -137,7 +258,13 @@ class RedisPipeline:
         timestamp: datetime | int,
         *,
         how: Literal["nx", "xx", "gt", "lt"] | None = None,
-    ) -> None:
+    ) -> QueuedCommand[int]:
+        """
+        Queue a PEXPIREAT command.
+
+        .. seealso:: :meth:`RedisClient.pexpireat`
+
+        """
         args: list[object] = []
         if isinstance(timestamp, datetime):
             args.append(timestamp.timestamp())
@@ -147,13 +274,25 @@ class RedisPipeline:
         if how is not None:
             args.append(how.upper())
 
-        self.queue_command("PEXPIREAT", key, *args)
+        return self.queue_command("PEXPIREAT", key, *args)
 
-    def pexpiretime(self, key: str) -> None:
-        self.queue_command("PEXPIRETIME", key)
+    def pexpiretime(self, key: str) -> QueuedCommand[int]:
+        """
+        Queue a PEXPIRETIME command.
 
-    def pttl(self, key: str) -> None:
-        self.queue_command("PTTL", key)
+        .. seealso:: :meth:`RedisClient.pexpiretime`
+
+        """
+        return self.queue_command("PEXPIRETIME", key)
+
+    def pttl(self, key: str) -> QueuedCommand[int]:
+        """
+        Queue a PTTL command.
+
+        .. seealso:: :meth:`RedisClient.pttl`
+
+        """
+        return self.queue_command("PTTL", key)
 
 
 class RedisTransaction(RedisPipeline):
@@ -167,13 +306,10 @@ class RedisTransaction(RedisPipeline):
     * The commands in the pipeline are wrapped with ``MULTI`` and ``EXEC`` commands
     """
 
-    async def execute(self) -> Sequence[ResponseValue | ResponseError]:
+    async def execute(self) -> None:
         """
         Execute the commands queued thus far in a transaction.
 
-        :return: a sequence of result values (or response errors) corresponding to the
-            number of queued commands (except for the implied ``MULTI`` and ``EXEC``
-            commands)
         :raises ResponseError: if the server returns an error response when queuing one
             of the commands
 
@@ -189,6 +325,7 @@ class RedisTransaction(RedisPipeline):
                     await conn.execute_command("DISCARD")
                     raise response
 
-            exec_response = await conn.execute_command("EXEC")
-            assert isinstance(exec_response, list)
-            return exec_response
+            results = await conn.execute_command("EXEC")
+            assert isinstance(results, list)
+            for command, result in zip(self._queued_commands, results):
+                command._result = result

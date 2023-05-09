@@ -21,6 +21,8 @@ Types
 
 .. autoclass:: RedisTransaction
 
+.. autoclass:: QueuedCommand
+
 .. autoclass:: RedisConnectionPoolStatistics
 
 .. autoclass:: RedisLock

@@ -504,16 +504,17 @@ class TestPipeline:
         async with RedisClient(port=redis_port) as client:
             await client.delete("foo")
             pipeline = client.pipeline()
-            pipeline.hset("foo", {"key": "value"})
-            pipeline.pexpire("foo", 1000)
-            pipeline.pttl("foo")
-            pipeline.get("foo")
-            results = await pipeline.execute()
-            assert results[:2] == [1, 1]
-            assert isinstance(results[2], int)
-            assert 990 < results[2] <= 1000
-            assert isinstance(results[3], ResponseError)
-            assert results[3].code == "WRONGTYPE"
+            hset = pipeline.hset("foo", {"key": "value"})
+            pexpire = pipeline.pexpire("foo", 1000)
+            pttl = pipeline.pttl("foo")
+            get = pipeline.get("foo")
+            await pipeline.execute()
+
+            assert hset.result() == 1
+            assert pexpire.result() == 1
+            assert 990 < pttl.result() <= 1000
+            with pytest.raises(ResponseError, match="WRONGTYPE "):
+                get.result()
 
 
 class TestTransaction:
@@ -521,13 +522,15 @@ class TestTransaction:
         async with RedisClient(port=redis_port) as client:
             await client.delete("foo")
             transaction = client.transaction()
-            transaction.hset("foo", {"key": "value"})
-            transaction.pexpire("foo", 1000)
-            transaction.pttl("foo")
-            results = await transaction.execute()
-            assert isinstance(results[2], int)
-            assert results[:2] == [1, 1]
-            assert 990 < results[2] <= 1000
+            hset = transaction.hset("foo", {"key": "value"})
+            pexpire = transaction.pexpire("foo", 1000)
+            pttl = transaction.pttl("foo")
+            await transaction.execute()
+
+            assert hset.result() == 1
+            assert pexpire.result() == 1
+            assert pexpire.result() == 1
+            assert 990 < pttl.result() <= 1000
 
     async def test_transaction_aborted(self, redis_port: int) -> None:
         async with RedisClient(port=redis_port) as client:

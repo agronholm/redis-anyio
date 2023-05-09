@@ -5,6 +5,7 @@ from ._exceptions import ProtocolError as ProtocolError
 from ._exceptions import RedisError as RedisError
 from ._exceptions import ResponseError as ResponseError
 from ._lock import RedisLock as RedisLock
+from ._pipeline import QueuedCommand as QueuedCommand
 from ._pipeline import RedisPipeline as RedisPipeline
 from ._pipeline import RedisTransaction as RedisTransaction
 from ._resp3 import VerbatimString as VerbatimString

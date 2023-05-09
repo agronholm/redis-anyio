@@ -43,6 +43,10 @@ Differences with the official Redis Python client
     flag.
   * There is currently no way to leverage the ``WATCH`` command in this implementation.
   * Commands are queued with synchronous calls, unlike with the official async client.
+  * Queuing a command in this implementation gives you a handle that lets you check the
+    result after execution, while in the official client, you get all the results
+    `back as a list <https://github.com/redis/redis-py#pipelines>`_ from the
+    ``execute()`` call.
 
 .. _AnyIO: https://pypi.org/project/anyio/
 .. _Trio: https://trio.readthedocs.io/en/stable/
