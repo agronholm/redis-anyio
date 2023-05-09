@@ -54,7 +54,8 @@ class RedisClient:
         ssl: bool | SSLContext = False,
         username: str | None = None,
         password: str | None = None,
-        max_connections: int = 2**16 - 1,  # TCP port numbers are 16 bit unsigned ints
+        pool_size: int = 64,
+        pool_overflow: int = 2048,
         timeout: float = 30,
         connect_timeout: float = 10,
         retry_wait: wait_base = wait_exponential(max=5),
@@ -69,8 +70,11 @@ class RedisClient:
             use SSL at all
         :param username: user name to authenticate with
         :param password: password to authenticate with
-        :param max_connections: the maximum number of concurrnet connections to the
-            server this client is allowed to keep open
+        :param pool_size: the maximum allowed number of server connections to keep in
+            the connection pool on standby
+        :param pool_overflow: the maximum number of disposable server connections to
+            allow this client to form with the server (this is _in addition to_
+            ``pool_size``; these connections will be dropped when not used any more)
         :param timeout: timeout (in seconds) for read/write operations
         :param connect_timeout: time (in seconds) to wait for a connect operation to
             succeed
@@ -90,7 +94,8 @@ class RedisClient:
             ssl_context=ssl_context,
             username=username,
             password=password,
-            max_connections=max_connections,
+            size=pool_size,
+            overflow=pool_overflow,
             timeout=timeout,
             connect_timeout=connect_timeout,
             retry_wait=retry_wait,

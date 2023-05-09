@@ -25,8 +25,8 @@ def decode(request: SubRequest) -> bool:
 
 
 async def test_statistics(redis_port: int) -> None:
-    async with RedisClient(port=redis_port) as client:
-        assert client.statistics().max_connections == 65535
+    async with RedisClient(port=redis_port, pool_size=2, pool_overflow=2) as client:
+        assert client.statistics().max_connections == 4
         assert client.statistics().total_connections == 0
         assert client.statistics().idle_connections == 0
         assert client.statistics().busy_connections == 0
@@ -34,18 +34,26 @@ async def test_statistics(redis_port: int) -> None:
         for _ in range(3):
             await client.ping()
 
-        assert client.statistics().max_connections == 65535
+        assert client.statistics().max_connections == 4
         assert client.statistics().total_connections == 1
         assert client.statistics().idle_connections == 1
         assert client.statistics().busy_connections == 0
 
         async with client.subscribe("foo"), client.subscribe("bar"):
-            assert client.statistics().max_connections == 65535
-            assert client.statistics().total_connections == 2
+            async with client.subscribe("baz"):
+                await client.ping()
+                assert client.statistics().max_connections == 4
+                assert client.statistics().total_connections == 3
+                assert client.statistics().idle_connections == 0
+                assert client.statistics().busy_connections == 3
+
             assert client.statistics().idle_connections == 0
             assert client.statistics().busy_connections == 2
 
-    assert client.statistics().max_connections == 65535
+        assert client.statistics().idle_connections == 2
+        assert client.statistics().busy_connections == 0
+
+    assert client.statistics().max_connections == 4
     assert client.statistics().total_connections == 0
     assert client.statistics().idle_connections == 0
     assert client.statistics().busy_connections == 0
