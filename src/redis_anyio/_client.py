@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import random
 import sys
-from collections import deque
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping
-from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass, field
+from collections.abc import AsyncIterator, Mapping
 from datetime import datetime, timedelta
 from itertools import chain
 from ssl import Purpose, SSLContext, create_default_context
 from types import TracebackType
-from typing import Any, AnyStr, Generic, Literal, cast, overload
+from typing import Any, Literal, cast, overload
 
 from tenacity import (
     stop_never,
@@ -20,7 +17,6 @@ from tenacity.stop import stop_base
 from tenacity.wait import wait_base
 
 from ._connection import (
-    RedisConnection,
     RedisConnectionPool,
     RedisConnectionPoolStatistics,
 )
@@ -54,7 +50,8 @@ class RedisClient:
         ssl: bool | SSLContext = False,
         username: str | None = None,
         password: str | None = None,
-        max_connections: int = 2**16 - 1,  # TCP port numbers are 16 bit unsigned ints
+        pool_size: int = 64,
+        pool_overflow: int = 2048,
         timeout: float = 30,
         connect_timeout: float = 10,
         retry_wait: wait_base = wait_exponential(max=5),
@@ -69,8 +66,11 @@ class RedisClient:
             use SSL at all
         :param username: user name to authenticate with
         :param password: password to authenticate with
-        :param max_connections: the maximum number of concurrnet connections to the
-            server this client is allowed to keep open
+        :param pool_size: the maximum allowed number of server connections to keep in
+            the connection pool on standby
+        :param pool_overflow: the maximum number of disposable server connections to
+            allow this client to form with the server (this is _in addition to_
+            ``pool_size``; these connections will be dropped when not used any more)
         :param timeout: timeout (in seconds) for read/write operations
         :param connect_timeout: time (in seconds) to wait for a connect operation to
             succeed
@@ -90,7 +90,8 @@ class RedisClient:
             ssl_context=ssl_context,
             username=username,
             password=password,
-            max_connections=max_connections,
+            size=pool_size,
+            overflow=pool_overflow,
             timeout=timeout,
             connect_timeout=connect_timeout,
             retry_wait=retry_wait,
@@ -201,7 +202,7 @@ class RedisClient:
         """
         Create a new command pipeline bound to this client.
 
-        .. seealso:: `Redis pipelining <https://redis.io/docs/manual/pipelining/>`
+        .. seealso:: `Redis pipelining <https://redis.io/docs/manual/pipelining/>`_
 
         """
         return RedisPipeline(self._pool)
@@ -215,7 +216,7 @@ class RedisClient:
 
         .. seealso::
             `How transactions work in Redis
-            <https://redis.io/docs/manual/transactions/>`
+            <https://redis.io/docs/manual/transactions/>`_
 
         """
         return RedisTransaction(self._pool)
@@ -284,14 +285,14 @@ class RedisClient:
         key: str,
         value: object,
         *,
-        nx: bool = False,
-        xx: bool = False,
-        get: bool = False,
-        ex: int | timedelta | None = None,
-        px: int | timedelta | None = None,
-        exat: int | datetime | None = None,
-        pxat: int | datetime | None = None,
-        keepttl: bool = False,
+        nx: bool = ...,
+        xx: bool = ...,
+        get: bool = ...,
+        ex: int | timedelta | None = ...,
+        px: int | timedelta | None = ...,
+        exat: int | datetime | None = ...,
+        pxat: int | datetime | None = ...,
+        keepttl: bool = ...,
         decode: Literal[True] = ...,
     ) -> str | None:
         ...
@@ -302,14 +303,14 @@ class RedisClient:
         key: str,
         value: object,
         *,
-        nx: bool = False,
-        xx: bool = False,
-        get: bool = False,
-        ex: int | timedelta | None = None,
-        px: int | timedelta | None = None,
-        exat: int | datetime | None = None,
-        pxat: int | datetime | None = None,
-        keepttl: bool = False,
+        nx: bool = ...,
+        xx: bool = ...,
+        get: bool = ...,
+        ex: int | timedelta | None = ...,
+        px: int | timedelta | None = ...,
+        exat: int | datetime | None = ...,
+        pxat: int | datetime | None = ...,
+        keepttl: bool = ...,
         decode: Literal[False],
     ) -> bytes | None:
         ...
@@ -320,14 +321,14 @@ class RedisClient:
         key: str,
         value: object,
         *,
-        nx: bool = False,
-        xx: bool = False,
-        get: bool = False,
-        ex: int | timedelta | None = None,
-        px: int | timedelta | None = None,
-        exat: int | datetime | None = None,
-        pxat: int | datetime | None = None,
-        keepttl: bool = False,
+        nx: bool = ...,
+        xx: bool = ...,
+        get: bool = ...,
+        ex: int | timedelta | None = ...,
+        px: int | timedelta | None = ...,
+        exat: int | datetime | None = ...,
+        pxat: int | datetime | None = ...,
+        keepttl: bool = ...,
         decode: bool,
     ) -> str | bytes | None:
         ...
@@ -348,11 +349,11 @@ class RedisClient:
         decode: bool = True,
     ) -> str | bytes | None:
         """
-        Set ``key`` hold the string ``value``.
+        Set ``key`` to hold the string ``value``.
 
         If both ``nx`` and ``xx`` are ``True``, the ``nx`` setting wins.
 
-        If more than one of the ``ex`` and ``px`` are ``exat`` and  ``pxat`` settings
+        If more than one of the ``ex``, ``px``, ``exat`` and  ``pxat`` settings
         have been set, the order of preference is ``ex`` > ``px`` > ``exat`` >
         ``pxat``, so ``ex`` would win if they all were defined.
 
@@ -544,14 +545,13 @@ class RedisClient:
         assert isinstance(retval, int)
         return retval
 
-    @asynccontextmanager
-    async def scan(
+    async def scan_iter(
         self,
         *,
         match: str | None = None,
         count: int | None = None,
         type_: str | None = None,
-    ) -> AsyncGenerator[AsyncIterator[str], None]:
+    ) -> AsyncIterator[str]:
         """
         Iterate over the set of keys in the current database.
 
@@ -562,27 +562,12 @@ class RedisClient:
 
         Usage::
 
-            async with client.scan(match="patter*") as iterator:
-                async for key in iterator:
-                    print(f"Found key: {key}")
+            async for key in client.scan(match="patter*"):
+                print(f"Found key: {key}")
 
         .. seealso:: `Official manual page for SCAN <https://redis.io/commands/scan/>`_
+
         """
-
-        async def iterate_keys(retval: ResponseValue) -> AsyncGenerator[str, None]:
-            while True:
-                assert isinstance(retval, list) and len(retval) == 2
-                cursor, items = retval
-                assert isinstance(items, list)
-                for item in items:
-                    assert isinstance(item, str)
-                    yield item
-
-                if cursor == "0":
-                    break
-
-                retval = await conn.execute_command("SCAN", cursor, *args)
-
         args: list[object] = []
         if match is not None:
             args.extend(["MATCH", match])
@@ -591,13 +576,15 @@ class RedisClient:
         if type_ is not None:
             args.extend(["TYPE", type_.upper()])
 
-        async with self._pool.acquire() as conn:
-            retval_ = await conn.execute_command("SCAN", 0, *args)
-            iterator = iterate_keys(retval_)
-            try:
-                yield iterator
-            finally:
-                await iterator.aclose()
+        cursor: str | None = None
+        while cursor != "0":
+            retval = await self.execute_command("SCAN", cursor or "0", *args)
+            assert isinstance(retval, list) and len(retval) == 2
+            cursor = cast(str, retval[0])
+            items = retval[1]
+            assert isinstance(items, list)
+            for item in items:
+                yield cast(str, item)
 
     async def time(self) -> tuple[int, int]:
         """
@@ -743,7 +730,8 @@ class RedisClient:
         :param wherefrom: ``left`` to remove an element from the beginning of the list,
             ``right`` to remove one from the end
         :param keys: the lists to remove elements from
-        :param count: the maximum number of elements to remove (omit
+        :param count: the maximum number of elements to remove (omit to return the first
+            element)
         :param timeout: seconds to wait for an element to appear on ``source``; 0 to
             wait indefinitely
         :param decode: ``True`` to decode byte strings in the response to strings,
@@ -1041,7 +1029,8 @@ class RedisClient:
         :param wherefrom: ``left`` to remove an element from the beginning of the list,
             ``right`` to remove one from the end
         :param keys: the lists to remove elements from
-        :param count: the maximum number of elements to remove (omit
+        :param count: the maximum number of elements to remove (omit to return the first
+            element)
         :param decode: ``True`` to decode byte strings in the response to strings,
             ``False`` to leave them as is
         :return: a tuple of (key, list of elements), or ``None`` if no elements were
@@ -1609,52 +1598,46 @@ class RedisClient:
             return retval
 
     @overload
-    def hscan(
+    def hscan_iter(
         self,
         key: str,
         *,
         match: str | None = None,
         count: int | None,
         decode: Literal[True] = ...,
-    ) -> AbstractAsyncContextManager[AsyncIterator[tuple[str, str]]]:
+    ) -> AsyncIterator[tuple[str, str]]:
         ...
 
     @overload
-    def hscan(
+    def hscan_iter(
         self,
         key: str,
         *,
         match: str | None = None,
         count: int | None,
         decode: Literal[False],
-    ) -> AbstractAsyncContextManager[AsyncIterator[tuple[str, bytes]]]:
+    ) -> AsyncIterator[tuple[str, bytes]]:
         ...
 
     @overload
-    def hscan(
+    def hscan_iter(
         self,
         key: str,
         *,
         match: str | None = None,
         count: int | None,
         decode: bool,
-    ) -> (
-        AbstractAsyncContextManager[AsyncIterator[tuple[str, str]]]
-        | AbstractAsyncContextManager[AsyncIterator[tuple[str, bytes]]]
-    ):
+    ) -> AsyncIterator[tuple[str, str]] | AsyncIterator[tuple[str, bytes]]:
         ...
 
-    def hscan(
+    async def hscan_iter(
         self,
         key: str,
         *,
         match: str | None = None,
         count: int | None,
         decode: bool = True,
-    ) -> (
-        AbstractAsyncContextManager[AsyncIterator[tuple[str, str]]]
-        | AbstractAsyncContextManager[AsyncIterator[tuple[str, bytes]]]
-    ):
+    ) -> (AsyncIterator[tuple[str, str]] | AsyncIterator[tuple[str, bytes]]):
         """
         Iterate over the fields in the given hash map.
 
@@ -1668,76 +1651,34 @@ class RedisClient:
 
         Usage::
 
-            async with client.hscan("hashmapname", match="patter*") as iterator:
-                async for field, value in iterator:
-                    print(f"Found field: {field} = {value}")
+            async for field, value in client.hscan("hashmapname", match="patter*"):
+                print(f"Found field: {field} = {value}")
 
         .. seealso::
             `Official manual page for HSCAN <https://redis.io/commands/hscan/>`_
+
         """
-
-        @dataclass
-        class FieldIterator(Generic[AnyStr]):
-            _pool: RedisConnectionPool
-            _exit_stack: AsyncExitStack = field(init=False)
-            _conn: RedisConnection = field(init=False)
-            _cursor: bytes = field(init=False)
-            _buffer: deque[tuple[str, AnyStr]] = field(
-                init=False, default_factory=deque
-            )
-
-            async def __aenter__(self) -> Self:
-                async with AsyncExitStack() as exit_stack:
-                    self._conn = await exit_stack.enter_async_context(
-                        self._pool.acquire()
-                    )
-                    self._exit_stack = exit_stack.pop_all()
-
-                return self
-
-            async def __aexit__(
-                self,
-                exc_type: type[BaseException] | None,
-                exc_val: BaseException | None,
-                exc_tb: TracebackType | None,
-            ) -> None:
-                await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
-
-            def __aiter__(self) -> Self:
-                return self
-
-            async def __anext__(self) -> tuple[str, AnyStr]:
-                if not self._buffer:
-                    if cursor := getattr(self, "_cursor", None) == b"0":
-                        raise StopAsyncIteration
-
-                    retval = await self._conn.execute_command(
-                        "HSCAN", key, cursor or b"0", *args, decode=False
-                    )
-                    assert isinstance(retval, list) and len(retval) == 2
-                    self._cursor = cast(bytes, retval[0])
-                    items = retval[1]
-                    assert isinstance(items, list)
-                    fields = [as_string(f) for f in items[::2]]
-                    values: list[Any] = (
-                        [as_string(v) for v in items[1::2]] if decode else items[1::2]
-                    )
-                    for field_, value in zip(fields, values):
-                        self._buffer.append((field_, value))
-
-                return self._buffer.popleft()
-
         args: list[object] = []
         if match is not None:
             args.extend(["MATCH", match])
         if count is not None:
             args.extend(["COUNT", count])
 
-        return (
-            FieldIterator[str](self._pool)
-            if decode
-            else FieldIterator[bytes](self._pool)
-        )
+        cursor: bytes | None = None
+        while cursor != b"0":
+            retval = await self.execute_command(
+                "HSCAN", key, cursor or "0", *args, decode=False
+            )
+            assert isinstance(retval, list) and len(retval) == 2
+            cursor = cast(bytes, retval[0])
+            items = retval[1]
+            assert isinstance(items, list)
+            fields = [as_string(f) for f in items[::2]]
+            values: list[Any] = (
+                [as_string(v) for v in items[1::2]] if decode else items[1::2]
+            )
+            for field_, value in zip(fields, values):
+                yield field_, value
 
     async def hset(self, key: str, values: Mapping[str, object]) -> int:
         """

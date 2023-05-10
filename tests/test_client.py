@@ -25,8 +25,8 @@ def decode(request: SubRequest) -> bool:
 
 
 async def test_statistics(redis_port: int) -> None:
-    async with RedisClient(port=redis_port) as client:
-        assert client.statistics().max_connections == 65535
+    async with RedisClient(port=redis_port, pool_size=2, pool_overflow=2) as client:
+        assert client.statistics().max_connections == 4
         assert client.statistics().total_connections == 0
         assert client.statistics().idle_connections == 0
         assert client.statistics().busy_connections == 0
@@ -34,18 +34,26 @@ async def test_statistics(redis_port: int) -> None:
         for _ in range(3):
             await client.ping()
 
-        assert client.statistics().max_connections == 65535
+        assert client.statistics().max_connections == 4
         assert client.statistics().total_connections == 1
         assert client.statistics().idle_connections == 1
         assert client.statistics().busy_connections == 0
 
         async with client.subscribe("foo"), client.subscribe("bar"):
-            assert client.statistics().max_connections == 65535
-            assert client.statistics().total_connections == 2
+            async with client.subscribe("baz"):
+                await client.ping()
+                assert client.statistics().max_connections == 4
+                assert client.statistics().total_connections == 3
+                assert client.statistics().idle_connections == 0
+                assert client.statistics().busy_connections == 3
+
             assert client.statistics().idle_connections == 0
             assert client.statistics().busy_connections == 2
 
-    assert client.statistics().max_connections == 65535
+        assert client.statistics().idle_connections == 2
+        assert client.statistics().busy_connections == 0
+
+    assert client.statistics().max_connections == 4
     assert client.statistics().total_connections == 0
     assert client.statistics().idle_connections == 0
     assert client.statistics().busy_connections == 0
@@ -187,9 +195,7 @@ class TestBasicKeyOperations:
             await client.set("strkey1", "value")
             await client.set("strkey2", "value")
             await client.rpush("listkey1", "value")
-            async with client.scan(count=1, **kwargs) as iterator:
-                keys = [key async for key in iterator]
-
+            keys = [key async for key in client.scan_iter(count=1, **kwargs)]
             assert sorted(keys) == expected_keys
 
 
@@ -341,18 +347,6 @@ class TestHashMapOperations:
             await client.hset("dummy", {"field": 2, "field2": 1})
             assert await client.hlen("dummy") == 2
 
-    async def test_hscan_all(self, redis_port: int, decode: bool) -> None:
-        async with RedisClient(port=redis_port) as client:
-            await client.delete("dummy")
-            await client.hset("dummy", {"key1": 8, "key2": "foo"})
-            async with client.hscan("dummy", count=1, decode=decode) as iterator:
-                result = {field: value async for field, value in iterator}
-
-        if decode:
-            assert result == {"key1": "8", "key2": "foo"}
-        else:
-            assert result == {"key1": b"8", "key2": b"foo"}
-
     async def test_hrandfield_single(self, redis_port: int) -> None:
         async with RedisClient(port=redis_port) as client:
             await client.delete("dummy")
@@ -378,14 +372,24 @@ class TestHashMapOperations:
             for field, value in fields.items():
                 assert value == field[-1] if decode else field[-1].encode("ascii")
 
+    async def test_hscan_all(self, redis_port: int, decode: bool) -> None:
+        async with RedisClient(port=redis_port) as client:
+            await client.delete("dummy")
+            await client.hset("dummy", {"key1": 8, "key2": "foo"})
+            iterator = client.hscan_iter("dummy", count=1, decode=decode)
+            result = {field: value async for field, value in iterator}
+
+        if decode:
+            assert result == {"key1": "8", "key2": "foo"}
+        else:
+            assert result == {"key1": b"8", "key2": b"foo"}
+
     async def test_hscan_match(self, redis_port: int, decode: bool) -> None:
         async with RedisClient(port=redis_port) as client:
             await client.delete("dummy")
             await client.hset("dummy", {"key1": 8, "key2": "foo"})
-            async with client.hscan(
-                "dummy", count=1, match="*2", decode=decode
-            ) as iterator:
-                result = {field: value async for field, value in iterator}
+            iterator = client.hscan_iter("dummy", count=1, match="*2", decode=decode)
+            result = {field: value async for field, value in iterator}
 
         if decode:
             assert result == {"key2": "foo"}
@@ -504,16 +508,17 @@ class TestPipeline:
         async with RedisClient(port=redis_port) as client:
             await client.delete("foo")
             pipeline = client.pipeline()
-            pipeline.hset("foo", {"key": "value"})
-            pipeline.pexpire("foo", 1000)
-            pipeline.pttl("foo")
-            pipeline.get("foo")
-            results = await pipeline.execute()
-            assert results[:2] == [1, 1]
-            assert isinstance(results[2], int)
-            assert 990 < results[2] <= 1000
-            assert isinstance(results[3], ResponseError)
-            assert results[3].code == "WRONGTYPE"
+            hset = pipeline.hset("foo", {"key": "value"})
+            pexpire = pipeline.pexpire("foo", 1000)
+            pttl = pipeline.pttl("foo")
+            get = pipeline.get("foo")
+            await pipeline.execute()
+
+            assert hset.result() == 1
+            assert pexpire.result() == 1
+            assert 990 < pttl.result() <= 1000
+            with pytest.raises(ResponseError, match="WRONGTYPE "):
+                get.result()
 
 
 class TestTransaction:
@@ -521,13 +526,15 @@ class TestTransaction:
         async with RedisClient(port=redis_port) as client:
             await client.delete("foo")
             transaction = client.transaction()
-            transaction.hset("foo", {"key": "value"})
-            transaction.pexpire("foo", 1000)
-            transaction.pttl("foo")
-            results = await transaction.execute()
-            assert isinstance(results[2], int)
-            assert results[:2] == [1, 1]
-            assert 990 < results[2] <= 1000
+            hset = transaction.hset("foo", {"key": "value"})
+            pexpire = transaction.pexpire("foo", 1000)
+            pttl = transaction.pttl("foo")
+            await transaction.execute()
+
+            assert hset.result() == 1
+            assert pexpire.result() == 1
+            assert pexpire.result() == 1
+            assert 990 < pttl.result() <= 1000
 
     async def test_transaction_aborted(self, redis_port: int) -> None:
         async with RedisClient(port=redis_port) as client:

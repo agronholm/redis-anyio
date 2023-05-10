@@ -252,7 +252,8 @@ class RedisConnectionPool:
     ssl_context: SSLContext | None
     username: str | None
     password: str | None
-    max_connections: int
+    size: int
+    overflow: int
     timeout: float
     connect_timeout: float
     retry_wait: wait_base
@@ -264,9 +265,8 @@ class RedisConnectionPool:
     _connections_task_group: TaskGroup = field(init=False)
 
     async def __aenter__(self) -> Self:
-        self._capacity_semaphore = Semaphore(
-            self.max_connections, max_value=self.max_connections
-        )
+        max_connections = self.size + self.overflow
+        self._capacity_semaphore = Semaphore(max_connections, max_value=max_connections)
         self._connections_task_group = create_task_group()
         await self._connections_task_group.__aenter__()
         return self
@@ -293,10 +293,11 @@ class RedisConnectionPool:
 
     def statistics(self) -> RedisConnectionPoolStatistics:
         """Return statistics about the max/busy/idle connections in this pool."""
-        acquired_connections = self.max_connections - self._capacity_semaphore.value
+        max_connections = self.size + self.overflow
+        acquired_connections = max_connections - self._capacity_semaphore.value
         idle_connections = len(self._idle_connections)
         return RedisConnectionPoolStatistics(
-            max_connections=self.max_connections,
+            max_connections=max_connections,
             total_connections=acquired_connections + idle_connections,
             idle_connections=idle_connections,
             busy_connections=acquired_connections,
@@ -322,8 +323,14 @@ class RedisConnectionPool:
                 await conn.aclose(force=True)
                 raise
             else:
-                # Otherwise, put it back in the pool
-                self._idle_connections.append(conn)
+                # Otherwise, put it back in the pool if there aren't enough idle
+                # connections
+                statistics = self.statistics()
+                eligible_idle_connections = (
+                    statistics.idle_connections + statistics.busy_connections - 1
+                )
+                if eligible_idle_connections < self.size:
+                    self._idle_connections.append(conn)
 
     async def _add_connection(self) -> RedisConnection:
         # Connect to the Redis server
