@@ -748,7 +748,8 @@ class RedisClient:
         :param wherefrom: ``left`` to remove an element from the beginning of the list,
             ``right`` to remove one from the end
         :param keys: the lists to remove elements from
-        :param count: the maximum number of elements to remove (omit
+        :param count: the maximum number of elements to remove (omit to return the first
+            element)
         :param timeout: seconds to wait for an element to appear on ``source``; 0 to
             wait indefinitely
         :param decode: ``True`` to decode byte strings in the response to strings,
@@ -1046,7 +1047,8 @@ class RedisClient:
         :param wherefrom: ``left`` to remove an element from the beginning of the list,
             ``right`` to remove one from the end
         :param keys: the lists to remove elements from
-        :param count: the maximum number of elements to remove (omit
+        :param count: the maximum number of elements to remove (omit to return the first
+            element)
         :param decode: ``True`` to decode byte strings in the response to strings,
             ``False`` to leave them as is
         :return: a tuple of (key, list of elements), or ``None`` if no elements were
