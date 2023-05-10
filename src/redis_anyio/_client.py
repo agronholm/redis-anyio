@@ -353,11 +353,11 @@ class RedisClient:
         decode: bool = True,
     ) -> str | bytes | None:
         """
-        Set ``key`` hold the string ``value``.
+        Set ``key`` to hold the string ``value``.
 
         If both ``nx`` and ``xx`` are ``True``, the ``nx`` setting wins.
 
-        If more than one of the ``ex`` and ``px`` are ``exat`` and  ``pxat`` settings
+        If more than one of the ``ex`` and ``px`` and ``exat`` and  ``pxat`` settings
         have been set, the order of preference is ``ex`` > ``px`` > ``exat`` >
         ``pxat``, so ``ex`` would win if they all were defined.
 

@@ -31,14 +31,14 @@ To get your changes merged to the main codebase, you need a GitHub account.
    `main Redis-AnyIO repository`_ and clicking on "Fork" near the top right corner.
 #. Clone the forked repository to your local machine with
    ``git clone git@github.com/yourusername/redis-anyio``.
-#. Create a branch for your pull request, like ``git checkout -b myfixname``
+#. Create a branch for your pull request, like ``git checkout -b myfixname``.
 #. Make the desired changes to the code base.
 #. Commit your changes locally. If your changes close an existing issue, add the text
    ``Fixes XXX.`` or ``Closes XXX.`` to the commit message (where XXX is the issue
    number).
-#. Push the changeset(s) to your forked repository (``git push``)
-#. Navigate to Pull requests page on the original repository (not your fork) and click
-   "New pull request"
+#. Push the changeset(s) to your forked repository (``git push``).
+#. Navigate to the pull requests page on the original repository (not your fork) and click
+   "New pull request".
 #. Click on the text "compare across forks".
 #. Select your own fork as the head repository and then select the correct branch name.
 #. Click on "Create pull request".

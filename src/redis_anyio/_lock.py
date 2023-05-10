@@ -105,7 +105,7 @@ class RedisLock:
     async def __aenter__(self) -> None:
         await self._local_lock.__aenter__()
 
-        # Start a background task that continously extends the expiration time of the
+        # Start a background task that continuously extends the expiration time of the
         # lock
         self._stop_event = Event()
         self._task_group = create_task_group()
