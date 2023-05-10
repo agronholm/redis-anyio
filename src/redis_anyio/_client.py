@@ -202,7 +202,7 @@ class RedisClient:
         """
         Create a new command pipeline bound to this client.
 
-        .. seealso:: `Redis pipelining <https://redis.io/docs/manual/pipelining/>`
+        .. seealso:: `Redis pipelining <https://redis.io/docs/manual/pipelining/>`_
 
         """
         return RedisPipeline(self._pool)
@@ -216,7 +216,7 @@ class RedisClient:
 
         .. seealso::
             `How transactions work in Redis
-            <https://redis.io/docs/manual/transactions/>`
+            <https://redis.io/docs/manual/transactions/>`_
 
         """
         return RedisTransaction(self._pool)
@@ -349,11 +349,11 @@ class RedisClient:
         decode: bool = True,
     ) -> str | bytes | None:
         """
-        Set ``key`` hold the string ``value``.
+        Set ``key`` to hold the string ``value``.
 
         If both ``nx`` and ``xx`` are ``True``, the ``nx`` setting wins.
 
-        If more than one of the ``ex`` and ``px`` are ``exat`` and  ``pxat`` settings
+        If more than one of the ``ex``, ``px``, ``exat`` and  ``pxat`` settings
         have been set, the order of preference is ``ex`` > ``px`` > ``exat`` >
         ``pxat``, so ``ex`` would win if they all were defined.
 
@@ -730,7 +730,8 @@ class RedisClient:
         :param wherefrom: ``left`` to remove an element from the beginning of the list,
             ``right`` to remove one from the end
         :param keys: the lists to remove elements from
-        :param count: the maximum number of elements to remove (omit
+        :param count: the maximum number of elements to remove (omit to return the first
+            element)
         :param timeout: seconds to wait for an element to appear on ``source``; 0 to
             wait indefinitely
         :param decode: ``True`` to decode byte strings in the response to strings,
@@ -1028,7 +1029,8 @@ class RedisClient:
         :param wherefrom: ``left`` to remove an element from the beginning of the list,
             ``right`` to remove one from the end
         :param keys: the lists to remove elements from
-        :param count: the maximum number of elements to remove (omit
+        :param count: the maximum number of elements to remove (omit to return the first
+            element)
         :param decode: ``True`` to decode byte strings in the response to strings,
             ``False`` to leave them as is
         :return: a tuple of (key, list of elements), or ``None`` if no elements were

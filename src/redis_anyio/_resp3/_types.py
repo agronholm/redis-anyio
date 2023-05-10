@@ -64,7 +64,7 @@ class VerbatimString(bytes):
         :type: str
 
         Specifies the formatting of the string; either ``txt`` for plain text, or
-        ``mkd`` for markdown.
+        ``mkd`` for Markdown.
     """
 
     type: bytes
