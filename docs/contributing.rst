@@ -1,7 +1,7 @@
 Contributing to Redis-AnyIO
 ===========================
 
-If you wish to contribute a fix or feature to Redis-AnyIO, please follow the following
+If you wish to contribute a fix or feature to Redis-AnyIO, please follow these
 guidelines.
 
 When you make a pull request against the main AnyIO codebase, Github runs the AnyIO test
