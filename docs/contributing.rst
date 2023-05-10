@@ -4,7 +4,7 @@ Contributing to Redis-AnyIO
 If you wish to contribute a fix or feature to Redis-AnyIO, please follow these
 guidelines.
 
-When you make a pull request against the main AnyIO codebase, Github runs the AnyIO test
+When you make a pull request against the main AnyIO codebase, GitHub runs the AnyIO test
 suite against your modified code. Before making a pull request, you should ensure that
 the modified code passes tests locally. To that end, the use of tox_ is recommended. The
 default tox run first runs ``pre-commit`` and then the actual test suite.
@@ -22,10 +22,10 @@ recommended to activate pre-commit_ on your local clone of the repository (using
 .. _tox: https://tox.wiki/en/latest/installation.html
 .. _pre-commit: https://pre-commit.com/#installation
 
-Making a pull request on Github
+Making a pull request on GitHub
 -------------------------------
 
-To get your changes merged to the main codebase, you need a Github account.
+To get your changes merged to the main codebase, you need a GitHub account.
 
 #. Fork the repository (if you don't have your own fork of it yet) by navigating to the
    `main Redis-AnyIO repository`_ and clicking on "Fork" near the top right corner.
