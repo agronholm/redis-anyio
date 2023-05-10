@@ -206,7 +206,7 @@ class RedisClient:
         """
         Create a new command pipeline bound to this client.
 
-        .. seealso:: `Redis pipelining <https://redis.io/docs/manual/pipelining/>`
+        .. seealso:: `Redis pipelining <https://redis.io/docs/manual/pipelining/>`_
 
         """
         return RedisPipeline(self._pool)
@@ -220,7 +220,7 @@ class RedisClient:
 
         .. seealso::
             `How transactions work in Redis
-            <https://redis.io/docs/manual/transactions/>`
+            <https://redis.io/docs/manual/transactions/>`_
 
         """
         return RedisTransaction(self._pool)
