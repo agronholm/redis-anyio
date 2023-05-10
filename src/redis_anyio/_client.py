@@ -357,7 +357,7 @@ class RedisClient:
 
         If both ``nx`` and ``xx`` are ``True``, the ``nx`` setting wins.
 
-        If more than one of the ``ex`` and ``px`` and ``exat`` and  ``pxat`` settings
+        If more than one of the ``ex``, ``px``, ``exat`` and  ``pxat`` settings
         have been set, the order of preference is ``ex`` > ``px`` > ``exat`` >
         ``pxat``, so ``ex`` would win if they all were defined.
 
