@@ -195,9 +195,7 @@ class TestBasicKeyOperations:
             await client.set("strkey1", "value")
             await client.set("strkey2", "value")
             await client.rpush("listkey1", "value")
-            async with client.scan(count=1, **kwargs) as iterator:
-                keys = [key async for key in iterator]
-
+            keys = [key async for key in client.scan_iter(count=1, **kwargs)]
             assert sorted(keys) == expected_keys
 
 
@@ -349,18 +347,6 @@ class TestHashMapOperations:
             await client.hset("dummy", {"field": 2, "field2": 1})
             assert await client.hlen("dummy") == 2
 
-    async def test_hscan_all(self, redis_port: int, decode: bool) -> None:
-        async with RedisClient(port=redis_port) as client:
-            await client.delete("dummy")
-            await client.hset("dummy", {"key1": 8, "key2": "foo"})
-            async with client.hscan("dummy", count=1, decode=decode) as iterator:
-                result = {field: value async for field, value in iterator}
-
-        if decode:
-            assert result == {"key1": "8", "key2": "foo"}
-        else:
-            assert result == {"key1": b"8", "key2": b"foo"}
-
     async def test_hrandfield_single(self, redis_port: int) -> None:
         async with RedisClient(port=redis_port) as client:
             await client.delete("dummy")
@@ -386,14 +372,24 @@ class TestHashMapOperations:
             for field, value in fields.items():
                 assert value == field[-1] if decode else field[-1].encode("ascii")
 
+    async def test_hscan_all(self, redis_port: int, decode: bool) -> None:
+        async with RedisClient(port=redis_port) as client:
+            await client.delete("dummy")
+            await client.hset("dummy", {"key1": 8, "key2": "foo"})
+            iterator = client.hscan_iter("dummy", count=1, decode=decode)
+            result = {field: value async for field, value in iterator}
+
+        if decode:
+            assert result == {"key1": "8", "key2": "foo"}
+        else:
+            assert result == {"key1": b"8", "key2": b"foo"}
+
     async def test_hscan_match(self, redis_port: int, decode: bool) -> None:
         async with RedisClient(port=redis_port) as client:
             await client.delete("dummy")
             await client.hset("dummy", {"key1": 8, "key2": "foo"})
-            async with client.hscan(
-                "dummy", count=1, match="*2", decode=decode
-            ) as iterator:
-                result = {field: value async for field, value in iterator}
+            iterator = client.hscan_iter("dummy", count=1, match="*2", decode=decode)
+            result = {field: value async for field, value in iterator}
 
         if decode:
             assert result == {"key2": "foo"}
