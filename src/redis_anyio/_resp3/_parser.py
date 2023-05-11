@@ -147,7 +147,10 @@ class RESP3Parser:
         return item
 
     def feed_bytes(self, data: bytes) -> None:
-        self._buffer += data
+        if self._subparser:
+            self._subparser.feed_bytes(data)
+        else:
+            self._buffer += data
 
 
 @dataclass
@@ -332,9 +335,6 @@ class PushDataParser(RESP3Parser):
 
         return RESP3PushData(item[0].decode("utf-8"), item[1:])
 
-    def feed_bytes(self, data: bytes) -> None:
-        self._array_parser.feed_bytes(data)
-
 
 @dataclass
 class AttributeParser(RESP3Parser):
@@ -346,6 +346,3 @@ class AttributeParser(RESP3Parser):
     def __next__(self) -> RESP3Attributes:
         item = next(self._map_parser)
         return RESP3Attributes(item)
-
-    def feed_bytes(self, data: bytes) -> None:
-        self._map_parser.feed_bytes(data)

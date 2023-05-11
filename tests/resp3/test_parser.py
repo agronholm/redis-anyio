@@ -103,6 +103,13 @@ def test_parser(payload: bytes, expected: Any, parser: RESP3Parser) -> None:
     assert responses[0] == expected
 
 
+def test_multipart_array(parser: RESP3Parser) -> None:
+    parser.feed_bytes(b"*2\r\n$4\r\nTe")
+    pytest.raises(StopIteration, next, parser)
+    parser.feed_bytes(b"st\r\n:7\r\n")
+    assert next(parser) == [b"Test", 7]
+
+
 def test_verbatim_string(parser: RESP3Parser) -> None:
     parser.feed_bytes(b"=txt:Test string\r\n")
     responses = list(parser)
