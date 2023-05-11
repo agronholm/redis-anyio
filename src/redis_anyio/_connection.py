@@ -66,7 +66,6 @@ logger = logging.getLogger("redis_anyio")
 
 @dataclass
 class RedisConnection:
-    timeout: float | None
     _send_stream: AnyByteSendStream = field(init=False)
     _response_stream: MemoryObjectReceiveStream[ResponseValue | ResponseError] = field(
         init=False
@@ -154,23 +153,21 @@ class RedisConnection:
 
     async def send_command(self, command: str, *args: object) -> None:
         payload = serialize_command(command, *args)
-        with fail_after(self.timeout):
-            await self._send_stream.send(payload)
-            logger.debug("Sent data to server: %r", payload)
+        await self._send_stream.send(payload)
+        logger.debug("Sent data to server: %r", payload)
 
     async def read_next_response(
         self, *, decode: bool
     ) -> ResponseValue | ResponseError:
-        with fail_after(self.timeout):
-            try:
-                response = await self._response_stream.receive()
-            except EndOfStream:
-                raise ConnectivityError from None
+        try:
+            response = await self._response_stream.receive()
+        except EndOfStream:
+            raise ConnectivityError from None
 
-            if decode and not isinstance(response, ResponseError):
-                response = decode_response_value(response)
+        if decode and not isinstance(response, ResponseError):
+            response = decode_response_value(response)
 
-            return response
+        return response
 
     async def execute_command(
         self, command: str, *args: object, decode: bool = True
@@ -185,10 +182,9 @@ class RedisConnection:
         await self.send_command(command, *args)
 
         # Read back the response
-        with fail_after(self.timeout):
-            response = await self.read_next_response(decode=decode)
-            if isinstance(response, ResponseError):
-                raise response
+        response = await self.read_next_response(decode=decode)
+        if isinstance(response, ResponseError):
+            raise response
 
         return response
 
@@ -254,7 +250,6 @@ class RedisConnectionPool:
     password: str | None
     size: int
     overflow: int
-    timeout: float
     connect_timeout: float
     retry_wait: wait_base
     retry_stop: stop_base
@@ -347,7 +342,7 @@ class RedisConnectionPool:
                         stream = await connect_tcp(self.host, self.port)
 
                 try:
-                    conn = RedisConnection(self.timeout)
+                    conn = RedisConnection()
                     await self._connections_task_group.start(conn.run, stream)
 
                     # Assemble authentication arguments for the HELLO command

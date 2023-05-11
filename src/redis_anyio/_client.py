@@ -52,7 +52,6 @@ class RedisClient:
         password: str | None = None,
         pool_size: int = 64,
         pool_overflow: int = 2048,
-        timeout: float = 30,
         connect_timeout: float = 10,
         retry_wait: wait_base = wait_exponential(max=5),
         retry_stop: stop_base = stop_never,
@@ -71,7 +70,6 @@ class RedisClient:
         :param pool_overflow: the maximum number of disposable server connections to
             allow this client to form with the server (this is _in addition to_
             ``pool_size``; these connections will be dropped when not used any more)
-        :param timeout: timeout (in seconds) for read/write operations
         :param connect_timeout: time (in seconds) to wait for a connect operation to
             succeed
         :param retry_wait: specifies how to wait before the next retry on a connection
@@ -92,7 +90,6 @@ class RedisClient:
             password=password,
             size=pool_size,
             overflow=pool_overflow,
-            timeout=timeout,
             connect_timeout=connect_timeout,
             retry_wait=retry_wait,
             retry_stop=retry_stop,
