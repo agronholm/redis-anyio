@@ -27,10 +27,10 @@ def parser() -> RESP3Parser:
     [
         pytest.param(b"_\r\n", None, id="null"),
         pytest.param(b"+Test string\r\n", b"Test string", id="string_simple"),
-        pytest.param(b"$11\r\nTest string\r\n", b"Test string", id="string_blob"),
+        pytest.param(b"$12\r\nTest\r\nstring\r\n", b"Test\r\nstring", id="string_blob"),
         pytest.param(
-            b"$?\r\n;5\r\nTest \r\n;6\r\nstring\r\n;0\r\n",
-            b"Test string",
+            b"$?\r\n;5\r\nTest \r\n;8\r\nstr\r\ning\r\n;0\r\n",
+            b"Test str\r\ning",
             id="string_streamed",
         ),
         pytest.param(b":-764363\r\n", -764363, id="integer"),
@@ -53,7 +53,9 @@ def parser() -> RESP3Parser:
         ),
         pytest.param(b"~2\r\n+Test\r\n:7\r\n", {b"Test", 7}, id="set_2_items"),
         pytest.param(b"~0\r\n", set(), id="set_empty"),
-        pytest.param(b"~2\r\n$4\r\nTest\r\n:7\r\n", {b"Test", 7}, id="set_nested"),
+        pytest.param(
+            b"~2\r\n$6\r\nTe\r\nst\r\n:7\r\n", {b"Te\r\nst", 7}, id="set_nested"
+        ),
         pytest.param(b"~?\r\n+Test\r\n:7\r\n.\r\n", {b"Test", 7}, id="set_streamed"),
         pytest.param(
             b"~?\r\n$4\r\nTest\r\n:7\r\n.\r\n", {b"Test", 7}, id="set_streamed_nested"
@@ -121,13 +123,13 @@ def test_simple_error(parser: RESP3Parser) -> None:
 
 
 def test_blob_error(parser: RESP3Parser) -> None:
-    parser.feed_bytes(b"!11\r\nERR Failure\r\n")
+    parser.feed_bytes(b"!13\r\nERR Fail\r\nure\r\n")
     responses = list(parser)
     assert len(responses) == 1
     assert isinstance(responses[0], RESP3BlobError)
     assert responses[0].code == b"ERR"
-    assert responses[0].message == b"Failure"
-    assert str(responses[0]) == "Failure"
+    assert responses[0].message == b"Fail\r\nure"
+    assert str(responses[0]) == "Fail\r\nure"
 
 
 def test_double_nan(parser: RESP3Parser) -> None:
@@ -166,8 +168,8 @@ def test_double_negative_inf(parser: RESP3Parser) -> None:
         pytest.param(b"#h\r\n", "Invalid boolean value: b'h'", id="bool"),
         pytest.param(b",-nan\r\n", "Invalid double value: b'-nan'", id="negative_nan"),
         pytest.param(
-            b"$4\r\nFoo\r\n",
-            "Invalid blob string: length mismatch: expected 4 bytes, got 3",
+            b"$2\r\nFoo\r\n",
+            "Invalid blob string: CRLF not found after reading 4 bytes",
             id="blob_string_length_mismatch",
         ),
         pytest.param(
@@ -176,9 +178,8 @@ def test_double_negative_inf(parser: RESP3Parser) -> None:
             id="verbatim_string_no_delimiter_found",
         ),
         pytest.param(
-            b"$?\r\n;4\r\nFoo\r\n",
-            "Invalid streamed string: length mismatch: expected 4 bytes in next "
-            "segment, got 3",
+            b"$?\r\n;2\r\nFoo\r\n",
+            "Invalid chunk in streamed string: CRLF not found after reading 4 bytes",
             id="streamed_string_length_mismatch",
         ),
         pytest.param(
@@ -187,8 +188,8 @@ def test_double_negative_inf(parser: RESP3Parser) -> None:
             id="simple_error_no_delimiter_found",
         ),
         pytest.param(
-            b"!4\r\nFoo\r\n",
-            "Invalid blob error: length mismatch: expected 4 bytes, got 3",
+            b"!2\r\nFoo\r\n",
+            "Invalid blob error: CRLF not found after reading 4 bytes",
             id="blob_error_length_mismatch",
         ),
         pytest.param(

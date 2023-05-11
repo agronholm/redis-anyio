@@ -31,7 +31,12 @@ RESP3Value: TypeAlias = Union[
     List["RESP3Value"],
     Set["RESP3Value"],
     Dict["RESP3Value", "RESP3Value"],
+    "RESP3End",
 ]
+
+
+class RESP3End:
+    """End-of-stream marker."""
 
 
 @dataclass
