@@ -782,8 +782,8 @@ class RedisClient:
             to wait indefinitely
         :param decode: ``True`` to decode byte strings in the response to strings,
             ``False`` to leave them as is
-        :return: a tuple of (list name, the removed element), or tuple of
-            ``(None, None)`` if the timeout was reached
+        :return: a tuple of (list name, the removed element), or ``None`` if the timeout
+            was reached
 
         .. seealso::
             `Official manual page for BLPOP <https://redis.io/commands/blpop/>`_
@@ -829,8 +829,8 @@ class RedisClient:
             to wait indefinitely
         :param decode: ``True`` to decode byte strings in the response to strings,
             ``False`` to leave them as is
-        :return: a tuple of (list name, the removed element), or tuple of
-            ``(None, None)`` if the timeout was reached
+        :return: a tuple of (list name, the removed element), or ``None`` if the timeout
+            was reached
 
         .. seealso::
             `Official manual page for BRPOP <https://redis.io/commands/brpop/>`_
