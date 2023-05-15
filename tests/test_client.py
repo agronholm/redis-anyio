@@ -200,6 +200,36 @@ class TestBasicKeyOperations:
 
 
 class TestListOperations:
+    async def test_blpop(self, redis_port: int, decode: bool) -> None:
+        async with RedisClient(port=redis_port) as client, create_task_group() as tg:
+            await client.delete("dummy")
+            tg.start_soon(client.rpush, "dummy", "value1", "value2", "value3")
+            result = await client.blpop("dummy", decode=decode)
+            if decode:
+                assert result == ("dummy", "value1")
+            else:
+                assert result == ("dummy", b"value1")
+
+    async def test_blpop_timeout(self, redis7_port: int) -> None:
+        async with RedisClient(port=redis7_port) as client:
+            await client.delete("dummy")
+            assert await client.blpop("dummy", timeout=1) is None
+
+    async def test_brpop(self, redis_port: int, decode: bool) -> None:
+        async with RedisClient(port=redis_port) as client, create_task_group() as tg:
+            await client.delete("dummy")
+            tg.start_soon(client.rpush, "dummy", "value1", "value2", "value3")
+            result = await client.brpop("dummy", decode=decode)
+            if decode:
+                assert result == ("dummy", "value3")
+            else:
+                assert result == ("dummy", b"value3")
+
+    async def test_brpop_timeout(self, redis7_port: int) -> None:
+        async with RedisClient(port=redis7_port) as client:
+            await client.delete("dummy")
+            assert await client.brpop("dummy", timeout=1) is None
+
     async def test_blmpop(self, redis7_port: int, decode: bool) -> None:
         async with RedisClient(port=redis7_port) as client, create_task_group() as tg:
             await client.delete("dummy")

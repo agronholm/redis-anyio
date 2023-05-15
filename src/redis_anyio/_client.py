@@ -752,25 +752,25 @@ class RedisClient:
 
     @overload
     async def blpop(
-        self, *keys: str, timeout: float = 0, decode: Literal[True] = ...
-    ) -> tuple[str, str] | tuple[None, None]:
+        self, *keys: str, timeout: int = ..., decode: Literal[True] = ...
+    ) -> tuple[str, str] | None:
         ...
 
     @overload
     async def blpop(
-        self, *keys: str, timeout: float = 0, decode: Literal[False]
-    ) -> tuple[str, bytes] | tuple[None, None]:
+        self, *keys: str, timeout: int = ..., decode: Literal[False]
+    ) -> tuple[str, bytes] | None:
         ...
 
     @overload
     async def blpop(
-        self, *keys: str, timeout: float = 0, decode: bool
-    ) -> tuple[str, str | bytes] | tuple[None, None]:
+        self, *keys: str, timeout: int = ..., decode: bool
+    ) -> tuple[str, str | bytes] | None:
         ...
 
     async def blpop(
-        self, *keys: str, timeout: float = 0, decode: bool = True
-    ) -> tuple[str, str | bytes] | tuple[None, None]:
+        self, *keys: str, timeout: int = 0, decode: bool = True
+    ) -> tuple[str, str | bytes] | None:
         """
         Remove and return the first element from one of the given lists.
 
@@ -790,34 +790,34 @@ class RedisClient:
 
         """
         retval = await self.execute_command("BLPOP", *keys, timeout, decode=decode)
-        assert isinstance(retval, list) and len(retval) == 2
-        if retval[0] is None:
-            return None, None
+        if retval is None:
+            return None
 
+        assert isinstance(retval, list) and len(retval) == 2
         assert isinstance(retval[1], (str, bytes))
         return as_string(retval[0]), retval[1]
 
     @overload
     async def brpop(
-        self, *keys: str, timeout: float = 0, decode: Literal[True] = ...
-    ) -> tuple[str, str] | tuple[None, None]:
+        self, *keys: str, timeout: int = ..., decode: Literal[True] = ...
+    ) -> tuple[str, str] | None:
         ...
 
     @overload
     async def brpop(
-        self, *keys: str, timeout: float = 0, decode: Literal[False]
-    ) -> tuple[str, bytes] | tuple[None, None]:
+        self, *keys: str, timeout: int = ..., decode: Literal[False]
+    ) -> tuple[str, bytes] | None:
         ...
 
     @overload
     async def brpop(
-        self, *keys: str, timeout: float = 0, decode: bool
-    ) -> tuple[str, str | bytes] | tuple[None, None]:
+        self, *keys: str, timeout: int = ..., decode: bool
+    ) -> tuple[str, str | bytes] | None:
         ...
 
     async def brpop(
-        self, *keys: str, timeout: float = 0, decode: bool = True
-    ) -> tuple[str, str | bytes] | tuple[None, None]:
+        self, *keys: str, timeout: int = 0, decode: bool = True
+    ) -> tuple[str, str | bytes] | None:
         """
         Remove and return the last element from one of the given lists.
 
@@ -837,10 +837,10 @@ class RedisClient:
 
         """
         retval = await self.execute_command("BRPOP", *keys, timeout, decode=decode)
-        assert isinstance(retval, list) and len(retval) == 2
-        if retval[0] is None:
-            return None, None
+        if retval is None:
+            return None
 
+        assert isinstance(retval, list) and len(retval) == 2
         assert isinstance(retval[1], (str, bytes))
         return as_string(retval[0]), retval[1]
 
