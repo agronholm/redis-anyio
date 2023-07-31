@@ -106,7 +106,9 @@ class RedisConnection:
         else:
             await self._send_stream.aclose()
 
-    async def run(self, stream: AnyByteStream, *, task_status: TaskStatus) -> None:
+    async def run(
+        self, stream: AnyByteStream, *, task_status: TaskStatus[None]
+    ) -> None:
         send, self._response_stream = create_memory_object_stream(100)
         async with stream, send:
             self._send_stream = stream
