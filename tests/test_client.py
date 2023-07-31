@@ -587,7 +587,7 @@ class TestLock:
     async def test_locking(self, redis_port: int, separate_locks: bool) -> None:
         events: list[str] = []
 
-        async def acquire_lock(*, task_status: TaskStatus) -> None:
+        async def acquire_lock(*, task_status: TaskStatus[None]) -> None:
             async with lock1:
                 task_status.started()
                 events.append("subtask acquired the lock")
@@ -633,7 +633,7 @@ class TestLock:
         one from getting the lock.
         """
 
-        async def acquire_lock(*, task_status: TaskStatus) -> None:
+        async def acquire_lock(*, task_status: TaskStatus[None]) -> None:
             async with lock:
                 task_status.started()
                 await sleep(5)

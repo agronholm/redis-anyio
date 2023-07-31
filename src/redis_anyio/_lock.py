@@ -82,7 +82,7 @@ class RedisLock:
             await self.client.script_load(source)
             return await self.client.evalsha(script_sha1, [self.name], list(args))
 
-    async def _run(self, *, task_status: TaskStatus) -> None:
+    async def _run(self, *, task_status: TaskStatus[None]) -> None:
         while not await self._run_script(
             ACQUIRE_SCRIPT, ACQUIRE_SCRIPT_SHA, self._token, self.lifetime
         ):
