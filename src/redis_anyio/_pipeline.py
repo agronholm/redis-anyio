@@ -71,18 +71,15 @@ class RedisPipeline:
         return self.queue_command("DELETE", *keys)
 
     @overload
-    def get(self, key: str, *, decode: Literal[True] = ...) -> QueuedCommand[str]:
-        ...
+    def get(self, key: str, *, decode: Literal[True] = ...) -> QueuedCommand[str]: ...
 
     @overload
-    def get(self, key: str, *, decode: Literal[False]) -> QueuedCommand[bytes]:
-        ...
+    def get(self, key: str, *, decode: Literal[False]) -> QueuedCommand[bytes]: ...
 
     @overload
     def get(
         self, key: str, *, decode: bool
-    ) -> QueuedCommand[str] | QueuedCommand[bytes]:
-        ...
+    ) -> QueuedCommand[str] | QueuedCommand[bytes]: ...
 
     def get(
         self, key: str, *, decode: bool = True
@@ -119,8 +116,7 @@ class RedisPipeline:
         pxat: int | datetime | None = ...,
         keepttl: bool = ...,
         decode: Literal[True] = ...,
-    ) -> QueuedCommand[str | None]:
-        ...
+    ) -> QueuedCommand[str | None]: ...
 
     @overload
     def set(
@@ -137,8 +133,7 @@ class RedisPipeline:
         pxat: int | datetime | None = ...,
         keepttl: bool = ...,
         decode: Literal[False],
-    ) -> QueuedCommand[bytes | None]:
-        ...
+    ) -> QueuedCommand[bytes | None]: ...
 
     @overload
     def set(
@@ -155,8 +150,7 @@ class RedisPipeline:
         pxat: int | datetime | None = ...,
         keepttl: bool = ...,
         decode: bool,
-    ) -> QueuedCommand[str | None] | QueuedCommand[bytes | None]:
-        ...
+    ) -> QueuedCommand[str | None] | QueuedCommand[bytes | None]: ...
 
     def set(
         self,
