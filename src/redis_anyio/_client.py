@@ -234,16 +234,13 @@ class RedisClient:
         return cast(int, await self.execute_command("DEL", *keys))
 
     @overload
-    async def get(self, key: str, *, decode: Literal[False]) -> bytes | None:
-        ...
+    async def get(self, key: str, *, decode: Literal[False]) -> bytes | None: ...
 
     @overload
-    async def get(self, key: str, *, decode: Literal[True] = ...) -> str | None:
-        ...
+    async def get(self, key: str, *, decode: Literal[True] = ...) -> str | None: ...
 
     @overload
-    async def get(self, key: str, *, decode: bool) -> str | bytes | None:
-        ...
+    async def get(self, key: str, *, decode: bool) -> str | bytes | None: ...
 
     async def get(self, key: str, *, decode: bool = True) -> str | bytes | None:
         """
@@ -291,8 +288,7 @@ class RedisClient:
         pxat: int | datetime | None = ...,
         keepttl: bool = ...,
         decode: Literal[True] = ...,
-    ) -> str | None:
-        ...
+    ) -> str | None: ...
 
     @overload
     async def set(
@@ -309,8 +305,7 @@ class RedisClient:
         pxat: int | datetime | None = ...,
         keepttl: bool = ...,
         decode: Literal[False],
-    ) -> bytes | None:
-        ...
+    ) -> bytes | None: ...
 
     @overload
     async def set(
@@ -327,8 +322,7 @@ class RedisClient:
         pxat: int | datetime | None = ...,
         keepttl: bool = ...,
         decode: bool,
-    ) -> str | bytes | None:
-        ...
+    ) -> str | bytes | None: ...
 
     async def set(
         self,
@@ -399,16 +393,13 @@ class RedisClient:
         return retval
 
     @overload
-    async def mget(self, *keys: str, decode: Literal[True] = ...) -> list[str]:
-        ...
+    async def mget(self, *keys: str, decode: Literal[True] = ...) -> list[str]: ...
 
     @overload
-    async def mget(self, *keys: str, decode: Literal[False]) -> list[bytes]:
-        ...
+    async def mget(self, *keys: str, decode: Literal[False]) -> list[bytes]: ...
 
     @overload
-    async def mget(self, *keys: str, decode: bool) -> list[str] | list[bytes]:
-        ...
+    async def mget(self, *keys: str, decode: bool) -> list[str] | list[bytes]: ...
 
     async def mget(self, *keys: str, decode: bool = True) -> list[str] | list[bytes]:
         """
@@ -611,8 +602,7 @@ class RedisClient:
         *,
         timeout: float = 0,
         decode: Literal[True] = ...,
-    ) -> str:
-        ...
+    ) -> str: ...
 
     @overload
     async def blmove(
@@ -624,8 +614,7 @@ class RedisClient:
         *,
         timeout: float = 0,
         decode: Literal[False],
-    ) -> bytes:
-        ...
+    ) -> bytes: ...
 
     @overload
     async def blmove(
@@ -637,8 +626,7 @@ class RedisClient:
         *,
         timeout: float = 0,
         decode: bool,
-    ) -> str | bytes:
-        ...
+    ) -> str | bytes: ...
 
     async def blmove(
         self,
@@ -685,8 +673,7 @@ class RedisClient:
         count: int | None = None,
         timeout: float = 0,
         decode: Literal[True] = ...,
-    ) -> tuple[str, list[bytes]]:
-        ...
+    ) -> tuple[str, list[bytes]]: ...
 
     @overload
     async def blmpop(
@@ -696,8 +683,7 @@ class RedisClient:
         count: int | None = None,
         timeout: float = 0,
         decode: Literal[False],
-    ) -> tuple[str, list[str]]:
-        ...
+    ) -> tuple[str, list[str]]: ...
 
     @overload
     async def blmpop(
@@ -707,8 +693,7 @@ class RedisClient:
         count: int | None = None,
         timeout: float = 0,
         decode: bool,
-    ) -> tuple[str, list[str] | list[bytes]]:
-        ...
+    ) -> tuple[str, list[str] | list[bytes]]: ...
 
     async def blmpop(
         self,
@@ -753,20 +738,17 @@ class RedisClient:
     @overload
     async def blpop(
         self, *keys: str, timeout: int = ..., decode: Literal[True] = ...
-    ) -> tuple[str, str] | None:
-        ...
+    ) -> tuple[str, str] | None: ...
 
     @overload
     async def blpop(
         self, *keys: str, timeout: int = ..., decode: Literal[False]
-    ) -> tuple[str, bytes] | None:
-        ...
+    ) -> tuple[str, bytes] | None: ...
 
     @overload
     async def blpop(
         self, *keys: str, timeout: int = ..., decode: bool
-    ) -> tuple[str, str | bytes] | None:
-        ...
+    ) -> tuple[str, str | bytes] | None: ...
 
     async def blpop(
         self, *keys: str, timeout: int = 0, decode: bool = True
@@ -800,20 +782,17 @@ class RedisClient:
     @overload
     async def brpop(
         self, *keys: str, timeout: int = ..., decode: Literal[True] = ...
-    ) -> tuple[str, str] | None:
-        ...
+    ) -> tuple[str, str] | None: ...
 
     @overload
     async def brpop(
         self, *keys: str, timeout: int = ..., decode: Literal[False]
-    ) -> tuple[str, bytes] | None:
-        ...
+    ) -> tuple[str, bytes] | None: ...
 
     @overload
     async def brpop(
         self, *keys: str, timeout: int = ..., decode: bool
-    ) -> tuple[str, str | bytes] | None:
-        ...
+    ) -> tuple[str, str | bytes] | None: ...
 
     async def brpop(
         self, *keys: str, timeout: int = 0, decode: bool = True
@@ -853,8 +832,7 @@ class RedisClient:
         whereto: Literal["left", "right"],
         *,
         decode: Literal[True] = ...,
-    ) -> str | None:
-        ...
+    ) -> str | None: ...
 
     @overload
     async def lmove(
@@ -865,8 +843,7 @@ class RedisClient:
         whereto: Literal["left", "right"],
         *,
         decode: Literal[False],
-    ) -> bytes | None:
-        ...
+    ) -> bytes | None: ...
 
     @overload
     async def lmove(
@@ -877,8 +854,7 @@ class RedisClient:
         whereto: Literal["left", "right"],
         *,
         decode: bool,
-    ) -> str | bytes | None:
-        ...
+    ) -> str | bytes | None: ...
 
     async def lmove(
         self,
@@ -912,16 +888,17 @@ class RedisClient:
         return retval
 
     @overload
-    async def lindex(self, key: str, index: int, *, decode: Literal[True] = ...) -> str:
-        ...
+    async def lindex(
+        self, key: str, index: int, *, decode: Literal[True] = ...
+    ) -> str: ...
 
     @overload
-    async def lindex(self, key: str, index: int, *, decode: Literal[False]) -> bytes:
-        ...
+    async def lindex(
+        self, key: str, index: int, *, decode: Literal[False]
+    ) -> bytes: ...
 
     @overload
-    async def lindex(self, key: str, index: int, *, decode: bool) -> str | bytes:
-        ...
+    async def lindex(self, key: str, index: int, *, decode: bool) -> str | bytes: ...
 
     async def lindex(self, key: str, index: int, *, decode: bool = True) -> str | bytes:
         """
@@ -990,8 +967,7 @@ class RedisClient:
         *keys: str,
         count: int | None = None,
         decode: Literal[True] = ...,
-    ) -> tuple[str, list[str]] | None:
-        ...
+    ) -> tuple[str, list[str]] | None: ...
 
     @overload
     async def lmpop(
@@ -1000,8 +976,7 @@ class RedisClient:
         *keys: str,
         count: int | None = None,
         decode: Literal[False],
-    ) -> tuple[str, list[bytes]] | None:
-        ...
+    ) -> tuple[str, list[bytes]] | None: ...
 
     @overload
     async def lmpop(
@@ -1010,8 +985,7 @@ class RedisClient:
         *keys: str,
         count: int | None = None,
         decode: bool,
-    ) -> tuple[str, list[str] | list[bytes]] | None:
-        ...
+    ) -> tuple[str, list[str] | list[bytes]] | None: ...
 
     async def lmpop(
         self,
@@ -1054,38 +1028,32 @@ class RedisClient:
     @overload
     async def lpop(
         self, key: str, count: None = ..., *, decode: Literal[True] = ...
-    ) -> str | None:
-        ...
+    ) -> str | None: ...
 
     @overload
     async def lpop(
         self, key: str, count: None = ..., *, decode: Literal[False]
-    ) -> bytes | None:
-        ...
+    ) -> bytes | None: ...
 
     @overload
     async def lpop(
         self, key: str, count: None = ..., *, decode: bool
-    ) -> str | bytes | None:
-        ...
+    ) -> str | bytes | None: ...
 
     @overload
     async def lpop(
         self, key: str, count: int, *, decode: Literal[True] = ...
-    ) -> list[str] | None:
-        ...
+    ) -> list[str] | None: ...
 
     @overload
     async def lpop(
         self, key: str, count: int, *, decode: Literal[False]
-    ) -> list[bytes] | None:
-        ...
+    ) -> list[bytes] | None: ...
 
     @overload
     async def lpop(
         self, key: str, count: int, *, decode: bool
-    ) -> list[str] | list[bytes] | None:
-        ...
+    ) -> list[str] | list[bytes] | None: ...
 
     async def lpop(
         self, key: str, count: int | None = None, *, decode: bool = True
@@ -1122,38 +1090,32 @@ class RedisClient:
     @overload
     async def rpop(
         self, key: str, count: None = ..., *, decode: Literal[True] = ...
-    ) -> str | None:
-        ...
+    ) -> str | None: ...
 
     @overload
     async def rpop(
         self, key: str, count: None = ..., *, decode: Literal[False]
-    ) -> bytes | None:
-        ...
+    ) -> bytes | None: ...
 
     @overload
     async def rpop(
         self, key: str, count: None = ..., *, decode: bool
-    ) -> str | bytes | None:
-        ...
+    ) -> str | bytes | None: ...
 
     @overload
     async def rpop(
         self, key: str, count: int, *, decode: Literal[True] = ...
-    ) -> list[str] | None:
-        ...
+    ) -> list[str] | None: ...
 
     @overload
     async def rpop(
         self, key: str, count: int, *, decode: Literal[False]
-    ) -> list[bytes] | None:
-        ...
+    ) -> list[bytes] | None: ...
 
     @overload
     async def rpop(
         self, key: str, count: int, *, decode: bool
-    ) -> list[str] | list[bytes] | None:
-        ...
+    ) -> list[str] | list[bytes] | None: ...
 
     async def rpop(
         self, key: str, count: int | None = None, *, decode: bool = True
@@ -1229,20 +1191,17 @@ class RedisClient:
     @overload
     async def getrange(
         self, key: str, start: int, end: int, decode: Literal[True] = ...
-    ) -> str:
-        ...
+    ) -> str: ...
 
     @overload
     async def getrange(
         self, key: str, start: int, end: int, decode: Literal[False]
-    ) -> bytes:
-        ...
+    ) -> bytes: ...
 
     @overload
     async def getrange(
         self, key: str, start: int, end: int, decode: bool
-    ) -> str | bytes:
-        ...
+    ) -> str | bytes: ...
 
     async def getrange(
         self, key: str, start: int, end: int, decode: bool = True
@@ -1325,16 +1284,15 @@ class RedisClient:
     @overload
     async def hget(
         self, key: str, field: str, decode: Literal[True] = ...
-    ) -> str | None:
-        ...
+    ) -> str | None: ...
 
     @overload
-    async def hget(self, key: str, field: str, decode: Literal[False]) -> bytes | None:
-        ...
+    async def hget(
+        self, key: str, field: str, decode: Literal[False]
+    ) -> bytes | None: ...
 
     @overload
-    async def hget(self, key: str, field: str, decode: bool) -> str | bytes | None:
-        ...
+    async def hget(self, key: str, field: str, decode: bool) -> str | bytes | None: ...
 
     async def hget(
         self, key: str, field: str, decode: bool = True
@@ -1357,18 +1315,17 @@ class RedisClient:
         return retval
 
     @overload
-    async def hgetall(self, key: str, decode: Literal[True] = ...) -> dict[str, str]:
-        ...
+    async def hgetall(
+        self, key: str, decode: Literal[True] = ...
+    ) -> dict[str, str]: ...
 
     @overload
-    async def hgetall(self, key: str, decode: Literal[False]) -> dict[bytes, bytes]:
-        ...
+    async def hgetall(self, key: str, decode: Literal[False]) -> dict[bytes, bytes]: ...
 
     @overload
     async def hgetall(
         self, key: str, decode: bool
-    ) -> dict[str, str] | dict[bytes, bytes]:
-        ...
+    ) -> dict[str, str] | dict[bytes, bytes]: ...
 
     async def hgetall(
         self, key: str, decode: bool = True
@@ -1466,20 +1423,17 @@ class RedisClient:
     @overload
     async def hmget(
         self, key: str, *fields: str, decode: Literal[True] = ...
-    ) -> list[str | None] | list[bytes | None]:
-        ...
+    ) -> list[str | None] | list[bytes | None]: ...
 
     @overload
     async def hmget(
         self, key: str, *fields: str, decode: Literal[False]
-    ) -> list[str | None] | list[bytes | None]:
-        ...
+    ) -> list[str | None] | list[bytes | None]: ...
 
     @overload
     async def hmget(
         self, key: str, *fields: str, decode: bool
-    ) -> list[str | None] | list[bytes | None]:
-        ...
+    ) -> list[str | None] | list[bytes | None]: ...
 
     async def hmget(
         self, key: str, *fields: str, decode: bool = True
@@ -1510,8 +1464,7 @@ class RedisClient:
         *,
         withvalues: bool = ...,
         decode: Literal[True] = ...,
-    ) -> str | list[str] | Mapping[str, str] | None:
-        ...
+    ) -> str | list[str] | Mapping[str, str] | None: ...
 
     @overload
     async def hrandfield(
@@ -1521,14 +1474,12 @@ class RedisClient:
         *,
         withvalues: bool = ...,
         decode: Literal[False],
-    ) -> bytes | list[str] | Mapping[str, bytes] | None:
-        ...
+    ) -> bytes | list[str] | Mapping[str, bytes] | None: ...
 
     @overload
     async def hrandfield(
         self, key: str, count: int | None = ..., *, withvalues: bool = ..., decode: bool
-    ) -> str | bytes | list[str] | Mapping[str, str] | Mapping[str, bytes] | None:
-        ...
+    ) -> str | bytes | list[str] | Mapping[str, str] | Mapping[str, bytes] | None: ...
 
     async def hrandfield(
         self,
@@ -1537,9 +1488,15 @@ class RedisClient:
         *,
         withvalues: bool = False,
         decode: bool = True,
-    ) -> str | bytes | list[str] | list[bytes] | Mapping[str, str] | Mapping[
-        str, bytes
-    ] | None:
+    ) -> (
+        str
+        | bytes
+        | list[str]
+        | list[bytes]
+        | Mapping[str, str]
+        | Mapping[str, bytes]
+        | None
+    ):
         """
         Retrieve the value(s) of one or more random fields in the given hash map.
 
@@ -1602,8 +1559,7 @@ class RedisClient:
         match: str | None = None,
         count: int | None,
         decode: Literal[True] = ...,
-    ) -> AsyncIterator[tuple[str, str]]:
-        ...
+    ) -> AsyncIterator[tuple[str, str]]: ...
 
     @overload
     def hscan_iter(
@@ -1613,8 +1569,7 @@ class RedisClient:
         match: str | None = None,
         count: int | None,
         decode: Literal[False],
-    ) -> AsyncIterator[tuple[str, bytes]]:
-        ...
+    ) -> AsyncIterator[tuple[str, bytes]]: ...
 
     @overload
     def hscan_iter(
@@ -1624,8 +1579,7 @@ class RedisClient:
         match: str | None = None,
         count: int | None,
         decode: bool,
-    ) -> AsyncIterator[tuple[str, str]] | AsyncIterator[tuple[str, bytes]]:
-        ...
+    ) -> AsyncIterator[tuple[str, str]] | AsyncIterator[tuple[str, bytes]]: ...
 
     async def hscan_iter(
         self,
@@ -1634,7 +1588,7 @@ class RedisClient:
         match: str | None = None,
         count: int | None,
         decode: bool = True,
-    ) -> (AsyncIterator[tuple[str, str]] | AsyncIterator[tuple[str, bytes]]):
+    ) -> AsyncIterator[tuple[str, str]] | AsyncIterator[tuple[str, bytes]]:
         """
         Iterate over the fields in the given hash map.
 
@@ -1860,8 +1814,7 @@ class RedisClient:
         *channels: str,
         send_connection_state_changes: bool = ...,
         decode: Literal[True] = ...,
-    ) -> Subscription[str]:
-        ...
+    ) -> Subscription[str]: ...
 
     @overload
     def subscribe(
@@ -1869,14 +1822,12 @@ class RedisClient:
         *channels: str,
         send_connection_state_changes: bool = ...,
         decode: Literal[False],
-    ) -> Subscription[bytes]:
-        ...
+    ) -> Subscription[bytes]: ...
 
     @overload
     def subscribe(
         self, *channels: str, send_connection_state_changes: bool = ..., decode: bool
-    ) -> Subscription[str] | Subscription[bytes]:
-        ...
+    ) -> Subscription[str] | Subscription[bytes]: ...
 
     def subscribe(
         self,
@@ -1921,8 +1872,7 @@ class RedisClient:
         *shardchannels: str,
         send_connection_state_changes: bool = ...,
         decode: Literal[True] = ...,
-    ) -> Subscription[str]:
-        ...
+    ) -> Subscription[str]: ...
 
     @overload
     def ssubscribe(
@@ -1930,8 +1880,7 @@ class RedisClient:
         *shardchannels: str,
         send_connection_state_changes: bool = ...,
         decode: Literal[False],
-    ) -> Subscription[bytes]:
-        ...
+    ) -> Subscription[bytes]: ...
 
     @overload
     def ssubscribe(
@@ -1939,8 +1888,7 @@ class RedisClient:
         *shardchannels: str,
         send_connection_state_changes: bool = ...,
         decode: bool,
-    ) -> Subscription[str] | Subscription[bytes]:
-        ...
+    ) -> Subscription[str] | Subscription[bytes]: ...
 
     def ssubscribe(
         self,
@@ -1986,8 +1934,7 @@ class RedisClient:
         *patterns: str,
         send_connection_state_changes: bool = ...,
         decode: Literal[True] = ...,
-    ) -> Subscription[str]:
-        ...
+    ) -> Subscription[str]: ...
 
     @overload
     def psubscribe(
@@ -1995,14 +1942,12 @@ class RedisClient:
         *patterns: str,
         send_connection_state_changes: bool = ...,
         decode: Literal[False],
-    ) -> Subscription[bytes]:
-        ...
+    ) -> Subscription[bytes]: ...
 
     @overload
     def psubscribe(
         self, *patterns: str, send_connection_state_changes: bool = ..., decode: bool
-    ) -> Subscription[str] | Subscription[bytes]:
-        ...
+    ) -> Subscription[str] | Subscription[bytes]: ...
 
     def psubscribe(
         self,

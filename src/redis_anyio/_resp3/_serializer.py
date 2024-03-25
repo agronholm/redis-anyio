@@ -1,4 +1,5 @@
 """Contains functions for serializing objects for sending to a Redis server."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
