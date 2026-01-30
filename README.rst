@@ -10,6 +10,8 @@
 
 This is an unofficial Redis_ client, implemented using AnyIO_.
 
+**DEPRECATED**: This project was never released. You should see Coredis_ instead.
+
 Features:
 
 * Full RESP3_ protocol support (Redis 6 and above)
@@ -22,6 +24,7 @@ Features:
 
 .. _Redis: https://redis.io/
 .. _AnyIO: https://pypi.org/project/anyio/
+.. _Coredis: https://github.com/alisaifee/coredis
 .. _documentation: https://redis-anyio.readthedocs.io/en/latest/
 .. _RESP3: https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md
 .. _mypy: https://www.mypy-lang.org/
